@@ -9,7 +9,7 @@ import {
   listAvailableGroups,
   login,
   logout,
-  sendResponsesStream
+  sendResponsesRequest
 } from './api'
 import type { ApiKey, ChatMessage, GeneratedImage, Group, UserProfile } from './types'
 
@@ -23,6 +23,41 @@ const textModels = [
 
 const imageModel = 'gpt-image-2'
 const imageSizes = ['1024x1024', '1536x1024', '1024x1536']
+const maxImageToolCallsPerTurn = 1
+const imageGenerationTool = {
+  type: 'function',
+  name: 'generate_image',
+  description: 'Generate an image when the user explicitly asks to draw, create, render, illustrate, or make a picture.',
+  parameters: {
+    type: 'object',
+    properties: {
+      prompt: {
+        type: 'string',
+        description: 'A complete image prompt describing the desired visual result.'
+      },
+      size: {
+        type: 'string',
+        enum: imageSizes,
+        description: 'Requested output size.'
+      },
+      n: {
+        type: 'integer',
+        minimum: 1,
+        maximum: 1,
+        description: 'Number of images to generate. Always use 1.'
+      }
+    },
+    required: ['prompt'],
+    additionalProperties: false
+  }
+}
+const imageToolInstructions = [
+  'You are a helpful assistant.',
+  'Reply in Chinese unless the user asks for another language.',
+  'When the user explicitly asks you to create, draw, generate, render, illustrate, or make an image, call generate_image instead of only describing the prompt.',
+  'Only call generate_image at most once in a single turn.',
+  'If no image is needed, answer normally.'
+].join(' ')
 
 const isAuthenticated = ref(hasAuthToken())
 const email = ref('')
@@ -70,6 +105,20 @@ const balanceLabel = computed(() => {
   }
   return `$${profile.value.balance.toFixed(4)}`
 })
+
+interface ResponseFunctionCall {
+  type: 'function_call'
+  id?: string
+  call_id: string
+  name: string
+  arguments: string
+}
+
+interface GenerateImageToolArgs {
+  prompt: string
+  size: string
+  n: number
+}
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -195,7 +244,96 @@ function extractResponseText(data: unknown): string {
   return JSON.stringify(data, null, 2)
 }
 
-function buildConversationInput(): Array<{ role: string; content: string }> {
+function ensureResponseSucceeded(data: unknown): void {
+  if (!data || typeof data !== 'object') {
+    return
+  }
+  const record = data as Record<string, any>
+  if (record.status === 'failed') {
+    throw new Error(record.error?.message || '模型请求失败')
+  }
+  if (record.status === 'incomplete') {
+    const reason = typeof record.incomplete_details?.reason === 'string'
+      ? record.incomplete_details.reason
+      : ''
+    throw new Error(reason ? `模型输出不完整：${reason}` : '模型输出不完整')
+  }
+}
+
+function extractResponseFunctionCalls(data: unknown): ResponseFunctionCall[] {
+  if (!data || typeof data !== 'object') {
+    return []
+  }
+  const output = (data as Record<string, any>).output
+  if (!Array.isArray(output)) {
+    return []
+  }
+  return output
+    .filter((item) =>
+      item &&
+      typeof item === 'object' &&
+      item.type === 'function_call' &&
+      typeof item.call_id === 'string' &&
+      typeof item.name === 'string'
+    )
+    .map((item) => ({
+      type: 'function_call',
+      id: typeof item.id === 'string' ? item.id : undefined,
+      call_id: item.call_id,
+      name: item.name,
+      arguments: typeof item.arguments === 'string' ? item.arguments : '{}'
+    }))
+}
+
+function parseGenerateImageToolArgs(functionCall: ResponseFunctionCall): GenerateImageToolArgs {
+  let parsed: Record<string, unknown> = {}
+  if (functionCall.arguments.trim()) {
+    try {
+      parsed = JSON.parse(functionCall.arguments) as Record<string, unknown>
+    } catch {
+      throw new Error('模型返回了无法解析的生图参数。')
+    }
+  }
+
+  const prompt = typeof parsed.prompt === 'string' ? parsed.prompt.trim() : ''
+  if (!prompt) {
+    throw new Error('模型调用了生图工具，但没有提供有效提示词。')
+  }
+
+  const size = typeof parsed.size === 'string' && imageSizes.includes(parsed.size)
+    ? parsed.size
+    : imageSize.value
+
+  return {
+    prompt,
+    size,
+    n: 1
+  }
+}
+
+function buildFunctionCallInput(functionCall: ResponseFunctionCall): Record<string, unknown> {
+  return {
+    type: 'function_call',
+    ...(functionCall.id ? { id: functionCall.id } : {}),
+    call_id: functionCall.call_id,
+    name: functionCall.name,
+    arguments: functionCall.arguments
+  }
+}
+
+function buildFunctionCallOutput(images: GeneratedImage[], prompt: string, size: string): string {
+  return JSON.stringify({
+    ok: true,
+    prompt,
+    size,
+    image_count: images.length,
+    image_url: images[0]?.remoteUrl || null,
+    preview_ready: true,
+    note: 'The UI already has the generated image preview and will display it to the user.'
+  })
+}
+
+function buildConversationInput(): Array<Record<string, unknown>> {
   return chatMessages.value
     .filter((message) => message.role === 'user' || message.role === 'assistant')
     .slice(-12)
@@ -217,18 +355,6 @@ function updateChatMessage(id: string, updates: Partial<ChatMessage>): void {
   })
 }
 
-function appendChatMessageContent(id: string, delta: string): void {
-  const index = chatMessages.value.findIndex((message) => message.id === id)
-  if (index < 0) {
-    return
-  }
-  const current = chatMessages.value[index]
-  chatMessages.value.splice(index, 1, {
-    ...current,
-    content: `${current.content}${delta}`
-  })
-}
-
 async function handleSendChat(): Promise<void> {
   const apiKey = selectedKeySecret.value
   const content = chatInput.value.trim()
@@ -241,6 +367,8 @@ async function handleSendChat(): Promise<void> {
     return
   }
 
+  errorMessage.value = ''
+  successMessage.value = ''
   chatInput.value = ''
   chatBusy.value = true
   chatMessages.value.push({
@@ -259,26 +387,92 @@ async function handleSendChat(): Promise<void> {
   chatMessages.value.push(assistantMessage)
 
   try {
-    let receivedText = false
-    const data = await sendResponsesStream(apiKey, {
+    const initialResponse = await sendResponsesRequest(apiKey, {
       model: selectedTextModel.value,
-      input: conversationInput
-    }, (delta) => {
-      if (!receivedText) {
-        updateChatMessage(assistantMessage.id, { content: '' })
-        receivedText = true
-      }
-      appendChatMessageContent(assistantMessage.id, delta)
+      instructions: imageToolInstructions,
+      input: conversationInput,
+      tools: [imageGenerationTool],
+      tool_choice: 'auto'
     })
-    if (!receivedText) {
+    ensureResponseSucceeded(initialResponse)
+
+    const functionCalls = extractResponseFunctionCalls(initialResponse)
+    if (functionCalls.length > maxImageToolCallsPerTurn) {
+      throw new Error('当前 Playground 每轮最多只允许一次自动生图调用。')
+    }
+
+    if (functionCalls.length === 0) {
       updateChatMessage(assistantMessage.id, {
-        content: extractResponseText(data) || '（模型没有返回文本）'
+        content: extractResponseText(initialResponse) || '（模型没有返回文本）'
       })
+      await refreshBalanceOnly()
+      return
+    }
+
+    const functionCall = functionCalls[0]
+    if (functionCall.name !== 'generate_image') {
+      throw new Error(`模型尝试调用未受支持的工具：${functionCall.name}`)
+    }
+
+    const toolArgs = parseGenerateImageToolArgs(functionCall)
+    updateChatMessage(assistantMessage.id, {
+      content: `模型已决定调用生图工具，正在生成 ${toolArgs.size} 图片...`
+    })
+
+    imageBusy.value = true
+    let images: GeneratedImage[] = []
+    try {
+      const imageResponse = await generateImage(apiKey, {
+        model: imageModel,
+        prompt: toolArgs.prompt,
+        size: toolArgs.size,
+        n: toolArgs.n,
+        response_format: 'b64_json'
+      })
+      images = extractGeneratedImages(imageResponse, toolArgs.prompt, toolArgs.size)
+    } finally {
+      imageBusy.value = false
+    }
+
+    if (images.length === 0) {
+      throw new Error('图片生成成功，但响应中没有可展示的图片。')
+    }
+
+    generatedImages.value = [...images, ...generatedImages.value]
+
+    let finalMessage = `已根据提示词生成图片：${toolArgs.prompt}`
+    try {
+      const finalResponse = await sendResponsesRequest(apiKey, {
+        model: selectedTextModel.value,
+        instructions: imageToolInstructions,
+        input: [
+          ...conversationInput,
+          buildFunctionCallInput(functionCall),
+          {
+            type: 'function_call_output',
+            call_id: functionCall.call_id,
+            output: buildFunctionCallOutput(images, toolArgs.prompt, toolArgs.size)
+          }
+        ]
+      })
+      ensureResponseSucceeded(finalResponse)
+      finalMessage = extractResponseText(finalResponse) || finalMessage
+    } catch (error) {
+      setError(error instanceof Error ? `图片已生成，但模型总结失败：${error.message}` : '图片已生成，但模型总结失败')
+    }
+
+    updateChatMessage(assistantMessage.id, {
+      content: finalMessage,
+      imageDataUrl: images[0].dataUrl || images[0].remoteUrl
+    })
+    if (!errorMessage.value) {
+      setSuccess('模型已自动调用生图工具并完成生成。')
     }
     await refreshBalanceOnly()
   } catch (error) {
     chatMessages.value = chatMessages.value.filter((message) => message.id !== assistantMessage.id)
     setError(error instanceof Error ? error.message : '对话请求失败')
+    imageBusy.value = false
   } finally {
     chatBusy.value = false
   }
@@ -460,7 +654,7 @@ onMounted(async () => {
             <textarea
               v-model="chatInput"
               rows="4"
-              placeholder="输入文字对话内容。自动工具调用会在后续阶段接入。"
+              placeholder="输入文字对话内容；当你明确要求画图时，文字模型会自动调用生图工具。"
             />
             <button :disabled="chatBusy || !selectedKeySecret" type="submit">
               {{ chatBusy ? '发送中...' : '发送对话' }}
