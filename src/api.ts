@@ -185,6 +185,121 @@ export async function sendResponsesRequest(
   return data
 }
 
+function extractStreamDelta(event: Record<string, any>): string {
+  if (typeof event.delta === 'string') {
+    return event.delta
+  }
+  if (typeof event.text === 'string' && String(event.type || '').includes('delta')) {
+    return event.text
+  }
+  if (event.delta && typeof event.delta === 'object' && typeof event.delta.text === 'string') {
+    return event.delta.text
+  }
+  const choiceDelta = event.choices?.[0]?.delta
+  if (choiceDelta && typeof choiceDelta.content === 'string') {
+    return choiceDelta.content
+  }
+  return ''
+}
+
+function parseSSEBlock(block: string): { data: unknown; delta: string } | null {
+  const dataLines = block
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+
+  if (dataLines.length === 0) {
+    return null
+  }
+
+  const raw = dataLines.join('\n').trim()
+  if (!raw || raw === '[DONE]') {
+    return null
+  }
+
+  try {
+    const data = JSON.parse(raw)
+    if (data && typeof data === 'object') {
+      return {
+        data,
+        delta: extractStreamDelta(data as Record<string, any>)
+      }
+    }
+    return { data, delta: '' }
+  } catch {
+    return null
+  }
+}
+
+export async function sendResponsesStream(
+  apiKey: string,
+  payload: Record<string, unknown>,
+  onDelta: (delta: string) => void
+): Promise<unknown> {
+  const response = await fetch(apiUrl('/v1/responses'), {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      ...payload,
+      stream: true
+    })
+  })
+
+  const contentType = response.headers.get('Content-Type') || ''
+  if (!response.ok || !response.body || !contentType.includes('text/event-stream')) {
+    const data = await readJson(response)
+    if (!response.ok) {
+      throw new Error(extractError(data, `Responses request failed: HTTP ${response.status}`))
+    }
+    return data
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let finalData: unknown = null
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) {
+      break
+    }
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+
+    let separatorIndex = buffer.indexOf('\n\n')
+    while (separatorIndex >= 0) {
+      const block = buffer.slice(0, separatorIndex)
+      buffer = buffer.slice(separatorIndex + 2)
+      const parsed = parseSSEBlock(block)
+      if (parsed) {
+        finalData = parsed.data
+        if (parsed.delta) {
+          onDelta(parsed.delta)
+        }
+      }
+      separatorIndex = buffer.indexOf('\n\n')
+    }
+  }
+
+  if (buffer.trim()) {
+    const parsed = parseSSEBlock(buffer)
+    if (parsed) {
+      finalData = parsed.data
+      if (parsed.delta) {
+        onDelta(parsed.delta)
+      }
+    }
+  }
+
+  if (finalData && typeof finalData === 'object' && 'response' in finalData) {
+    return (finalData as Record<string, unknown>).response
+  }
+  return finalData
+}
+
 export async function generateImage(
   apiKey: string,
   payload: Record<string, unknown>

@@ -9,7 +9,7 @@ import {
   listAvailableGroups,
   login,
   logout,
-  sendResponsesRequest
+  sendResponsesStream
 } from './api'
 import type { ApiKey, ChatMessage, GeneratedImage, Group, UserProfile } from './types'
 
@@ -225,20 +225,33 @@ async function handleSendChat(): Promise<void> {
     content,
     createdAt: Date.now()
   })
+  const conversationInput = buildConversationInput()
+  const assistantMessage: ChatMessage = {
+    id: uid('assistant'),
+    role: 'assistant',
+    content: '正在等待模型响应...',
+    createdAt: Date.now()
+  }
+  chatMessages.value.push(assistantMessage)
 
   try {
-    const data = await sendResponsesRequest(apiKey, {
+    let receivedText = false
+    const data = await sendResponsesStream(apiKey, {
       model: selectedTextModel.value,
-      input: buildConversationInput()
+      input: conversationInput
+    }, (delta) => {
+      if (!receivedText) {
+        assistantMessage.content = ''
+        receivedText = true
+      }
+      assistantMessage.content += delta
     })
-    chatMessages.value.push({
-      id: uid('assistant'),
-      role: 'assistant',
-      content: extractResponseText(data),
-      createdAt: Date.now()
-    })
+    if (!receivedText) {
+      assistantMessage.content = extractResponseText(data) || '（模型没有返回文本）'
+    }
     await refreshBalanceOnly()
   } catch (error) {
+    chatMessages.value = chatMessages.value.filter((message) => message.id !== assistantMessage.id)
     setError(error instanceof Error ? error.message : '对话请求失败')
   } finally {
     chatBusy.value = false
