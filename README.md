@@ -1,21 +1,30 @@
-# Image Playground
+# Sub2API Image Playground
 
-`image-playground` is a standalone web playground that runs beside `sub2api` on a separate port.
+[中文说明](./README_CN.md)
 
-It does not connect to PostgreSQL or Redis directly. Login, balance, API keys, usage recording, billing, concurrency, and upstream routing all go through the existing `sub2api` backend.
+`sub2api_playground` is a standalone Vue 3 + Vite web playground for `sub2api`.
 
-## Features In This MVP
+GitHub repository:
 
-- Login with an existing `sub2api` user account.
-- Show current balance.
+- https://github.com/meteor041/sub2api_playground.git
+
+This project runs on a separate port, but it still relies on the existing `sub2api` backend for authentication, balance, API keys, usage logging, billing, concurrency control, and upstream routing.
+
+## Features
+
+- Login with an existing `sub2api` account.
+- Show the current account balance.
 - Select or create an OpenAI group API key.
-- Chat with text models such as `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, and `gpt-5.3-codex-spark`.
+- Chat with text models such as `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.3-codex`, `gpt-5.3-codex-spark`, and `gpt-5.2`.
+- Paste screenshots directly into chat or attach local image files before sending a message.
+- Let the text model automatically call the image generation tool when the user explicitly asks to create an image.
 - Generate images manually with `gpt-image-2`.
 
-## Development
+## Quick Start
 
 ```bash
-cd image-playground
+git clone https://github.com/meteor041/sub2api_playground.git
+cd sub2api_playground
 npm install
 npm run dev
 ```
@@ -28,7 +37,7 @@ By default, Vite proxies these paths to `http://localhost:8080`:
 - `/v1`
 - `/images`
 
-Override the backend URL if needed:
+If your backend runs elsewhere, override the proxy target:
 
 ```bash
 VITE_SUB2API_PROXY_TARGET=http://127.0.0.1:8080 npm run dev
@@ -36,25 +45,27 @@ VITE_SUB2API_PROXY_TARGET=http://127.0.0.1:8080 npm run dev
 
 For production, set `VITE_SUB2API_BASE_URL` to the public `sub2api` origin, or serve this app behind the same reverse proxy as `sub2api`.
 
+## Request Flow
+
+```text
+sub2api_playground -> sub2api backend -> PostgreSQL / Redis
+```
+
+The playground does not connect to PostgreSQL or Redis directly.
+
 ## Docker Deployment
 
 The Docker image builds the static frontend and serves it with Nginx on port `8081`.
 
-It also proxies these paths to the existing `sub2api` container:
+It proxies these paths to the existing `sub2api` service:
 
 - `/api/v1`
 - `/v1`
 - `/images`
 
-No PostgreSQL or Redis settings are needed here. The request flow is:
-
-```text
-image-playground -> sub2api backend -> PostgreSQL / Redis
-```
-
 ### Host Network Deployment
 
-Use this mode if your existing `sub2api` container is running with Docker host networking.
+Use this mode if your existing `sub2api` container is already running with Docker host networking.
 
 Check that `sub2api` is reachable from the host:
 
@@ -62,17 +73,11 @@ Check that `sub2api` is reachable from the host:
 curl -fsS http://127.0.0.1:8080/health
 ```
 
-Check that the playground port is free:
+Clone and start the playground:
 
 ```bash
-ss -ltnp | grep ':8081' || true
-```
-
-Deploy:
-
-```bash
-git clone <your-image-playground-repo-url>
-cd image-playground
+git clone https://github.com/meteor041/sub2api_playground.git
+cd sub2api_playground
 SUB2API_UPSTREAM=http://127.0.0.1:8080 docker compose -f docker-compose.host.example.yml up -d --build
 ```
 
@@ -84,7 +89,7 @@ curl -fsS http://127.0.0.1:8081/health
 
 ### Bridge Network Deployment
 
-Use this mode only if `sub2api` and `image-playground` share a Docker bridge network.
+Use this mode only if `sub2api` and `sub2api_playground` share the same Docker bridge network.
 
 Find the Docker network used by your existing `sub2api` deployment:
 
@@ -94,11 +99,11 @@ docker network ls
 
 If you deployed `sub2api` from its `deploy/` folder, the network is commonly named `deploy_sub2api-network`.
 
-Deploy this playground on the server:
+Clone and start the playground:
 
 ```bash
-git clone <your-image-playground-repo-url>
-cd image-playground
+git clone https://github.com/meteor041/sub2api_playground.git
+cd sub2api_playground
 SUB2API_DOCKER_NETWORK=deploy_sub2api-network docker compose -f docker-compose.example.yml up -d --build
 ```
 
@@ -108,7 +113,7 @@ Then open:
 http://your-server-ip:8081
 ```
 
-If your `sub2api` container has a different name or URL, override the upstream:
+If your `sub2api` container uses a different hostname or upstream URL, override it:
 
 ```bash
 SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.yml up -d --build
@@ -116,7 +121,7 @@ SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.ym
 
 ## Domain Proxy
 
-For `playground.meteor041.com`, point the domain to `http://127.0.0.1:8081` in your reverse proxy or Cloudflare Tunnel.
+For `playground.meteor041.com`, point the domain to `http://127.0.0.1:8081` through your reverse proxy or Cloudflare Tunnel.
 
 If you use Cloudflare Tunnel, add a public hostname:
 
@@ -129,5 +134,6 @@ If you expose `8081` directly, open TCP `8081` in both the server firewall and t
 
 ## Notes
 
-- The current backend image model is `gpt-image-2`. If the product name should be `image-gpt-2`, keep that as a display alias and send `gpt-image-2` to the backend.
-- This MVP lets the browser call the gateway with a selected user API key. For production hardening, add a JWT-authenticated BFF so the browser never sees API keys.
+- The current backend image model name is `gpt-image-2`. If you want to display `image-gpt-2` in the UI, keep it as a display alias and still send `gpt-image-2` to the backend.
+- The current MVP lets the browser call the gateway with a selected user API key. For production hardening, add a JWT-authenticated BFF so the browser never sees API keys.
+- This repository is published separately, but it is designed to work with an existing `sub2api` deployment instead of replacing it.
