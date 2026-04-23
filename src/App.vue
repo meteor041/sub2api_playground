@@ -11,7 +11,7 @@ import {
   logout,
   sendResponsesRequest
 } from './api'
-import type { ApiKey, ChatMessage, GeneratedImage, Group, UserProfile } from './types'
+import type { ApiKey, ChatImageAttachment, ChatMessage, GeneratedImage, Group, UserProfile } from './types'
 
 const textModels = [
   'gpt-5.4',
@@ -76,6 +76,8 @@ const selectedTextModel = ref(textModels[0])
 const chatInput = ref('')
 const chatBusy = ref(false)
 const chatMessages = ref<ChatMessage[]>([])
+const composerImages = ref<ChatImageAttachment[]>([])
+const composerFileInput = ref<HTMLInputElement | null>(null)
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -122,6 +124,37 @@ interface GenerateImageToolArgs {
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n/g, '\n')
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error('读取图片失败'))
+    }
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function createChatImageAttachment(file: File): Promise<ChatImageAttachment> {
+  if (!file.type.startsWith('image/')) {
+    throw new Error(`仅支持图片文件：${file.name}`)
+  }
+  return {
+    id: uid('attachment'),
+    name: file.name || 'image.png',
+    mimeType: file.type || 'image/png',
+    dataUrl: await readFileAsDataUrl(file)
+  }
 }
 
 function setError(message: string): void {
@@ -180,7 +213,12 @@ async function handleLogout(): Promise<void> {
   apiKeys.value = []
   groups.value = []
   selectedApiKeyId.value = null
+  chatInput.value = ''
   chatMessages.value = []
+  composerImages.value = []
+  if (composerFileInput.value) {
+    composerFileInput.value.value = ''
+  }
   generatedImages.value = []
 }
 
@@ -333,14 +371,39 @@ function buildFunctionCallOutput(images: GeneratedImage[], prompt: string, size:
   })
 }
 
+function buildChatMessageInput(message: ChatMessage): Record<string, unknown> {
+  if (message.role !== 'user' || !message.attachments?.length) {
+    return {
+      role: message.role,
+      content: message.content
+    }
+  }
+
+  const parts: Array<Record<string, string>> = []
+  if (message.content) {
+    parts.push({
+      type: 'input_text',
+      text: message.content
+    })
+  }
+  for (const attachment of message.attachments) {
+    parts.push({
+      type: 'input_image',
+      image_url: attachment.dataUrl
+    })
+  }
+
+  return {
+    role: message.role,
+    content: parts
+  }
+}
+
 function buildConversationInput(): Array<Record<string, unknown>> {
   return chatMessages.value
     .filter((message) => message.role === 'user' || message.role === 'assistant')
     .slice(-12)
-    .map((message) => ({
-      role: message.role,
-      content: message.content
-    }))
+    .map((message) => buildChatMessageInput(message))
 }
 
 function updateChatMessage(id: string, updates: Partial<ChatMessage>): void {
@@ -355,27 +418,96 @@ function updateChatMessage(id: string, updates: Partial<ChatMessage>): void {
   })
 }
 
+function removeComposerImage(id: string): void {
+  composerImages.value = composerImages.value.filter((image) => image.id !== id)
+}
+
+function messageImages(message: ChatMessage): string[] {
+  const images = message.attachments?.map((image) => image.dataUrl) || []
+  if (message.imageDataUrl) {
+    images.push(message.imageDataUrl)
+  }
+  return images
+}
+
+function openComposerFilePicker(): void {
+  composerFileInput.value?.click()
+}
+
+async function appendComposerImages(files: File[]): Promise<void> {
+  const imageFiles = files.filter((file) => file.type.startsWith('image/'))
+  if (imageFiles.length === 0) {
+    setError('只能添加图片文件。')
+    return
+  }
+
+  try {
+    const attachments = await Promise.all(imageFiles.map((file) => createChatImageAttachment(file)))
+    composerImages.value = [...composerImages.value, ...attachments]
+    errorMessage.value = ''
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '添加图片失败')
+  }
+}
+
+async function handleComposerFileChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement | null
+  const files = Array.from(input?.files || [])
+  await appendComposerImages(files)
+  if (input) {
+    input.value = ''
+  }
+}
+
+async function handleComposerPaste(event: ClipboardEvent): Promise<void> {
+  const clipboard = event.clipboardData
+  if (!clipboard) {
+    return
+  }
+
+  const imageFiles = Array.from(clipboard.items)
+    .filter((item) => item.type.startsWith('image/'))
+    .map((item) => item.getAsFile())
+    .filter((file): file is File => Boolean(file))
+
+  if (imageFiles.length === 0) {
+    return
+  }
+
+  event.preventDefault()
+  const text = normalizeLineEndings(clipboard.getData('text/plain'))
+  if (text.trim()) {
+    chatInput.value = chatInput.value
+      ? `${chatInput.value}${chatInput.value.endsWith('\n') ? '' : '\n'}${text}`
+      : text
+  }
+  await appendComposerImages(imageFiles)
+}
+
 async function handleSendChat(): Promise<void> {
   const apiKey = selectedKeySecret.value
   const content = chatInput.value.trim()
+  const attachments = composerImages.value.map((image) => ({ ...image }))
   if (!apiKey) {
     setError('请先选择或创建一个 OpenAI 分组 API Key。')
     return
   }
-  if (!content) {
-    setError('请输入对话内容。')
+  if (!content && attachments.length === 0) {
+    setError('请输入对话内容或添加图片。')
     return
   }
 
   errorMessage.value = ''
   successMessage.value = ''
   chatInput.value = ''
+  composerImages.value = []
   chatBusy.value = true
   chatMessages.value.push({
     id: uid('user'),
     role: 'user',
     content,
-    createdAt: Date.now()
+    createdAt: Date.now(),
+    attachments: attachments.length > 0 ? attachments : undefined
   })
   const conversationInput = buildConversationInput()
   const assistantMessage: ChatMessage = {
@@ -645,17 +777,52 @@ onMounted(async () => {
               :class="message.role"
             >
               <div class="message-role">{{ message.role === 'user' ? '你' : '模型' }}</div>
-              <p>{{ message.content }}</p>
-              <img v-if="message.imageDataUrl" :src="message.imageDataUrl" alt="Generated image" />
+              <p v-if="message.content">{{ message.content }}</p>
+              <div v-if="messageImages(message).length > 0" class="message-images">
+                <img
+                  v-for="image in messageImages(message)"
+                  :key="image"
+                  :src="image"
+                  :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
+                />
+              </div>
             </article>
           </div>
 
           <form class="composer" @submit.prevent="handleSendChat">
-            <textarea
-              v-model="chatInput"
-              rows="4"
-              placeholder="输入文字对话内容；当你明确要求画图时，文字模型会自动调用生图工具。"
+            <input
+              ref="composerFileInput"
+              class="composer-file-input"
+              type="file"
+              accept="image/*"
+              multiple
+              @change="handleComposerFileChange"
             />
+            <div class="composer-main">
+              <div v-if="composerImages.length > 0" class="composer-previews">
+                <article v-for="image in composerImages" :key="image.id" class="composer-preview">
+                  <img :src="image.dataUrl" :alt="image.name" />
+                  <div class="composer-preview-meta">
+                    <span>{{ image.name }}</span>
+                    <button class="ghost mini" type="button" @click="removeComposerImage(image.id)">
+                      移除
+                    </button>
+                  </div>
+                </article>
+              </div>
+              <textarea
+                v-model="chatInput"
+                rows="4"
+                placeholder="输入文字对话内容；支持粘贴图片或点击“添加图片”。当你明确要求画图时，文字模型会自动调用生图工具。"
+                @paste="handleComposerPaste"
+              />
+              <div class="composer-tools">
+                <button class="secondary" type="button" :disabled="chatBusy" @click="openComposerFilePicker">
+                  添加图片
+                </button>
+                <span class="composer-hint">支持复制截图后直接粘贴，或选择本地图片一起发送。</span>
+              </div>
+            </div>
             <button :disabled="chatBusy || !selectedKeySecret" type="submit">
               {{ chatBusy ? '发送中...' : '发送对话' }}
             </button>

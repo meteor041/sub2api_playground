@@ -50,11 +50,19 @@ export interface LoginResponse {
   temp_token?: string
 }
 
+export interface ChatImageAttachment {
+  id: string
+  name: string
+  mimeType: string
+  dataUrl: string
+}
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   createdAt: number
+  attachments?: ChatImageAttachment[]
   imageDataUrl?: string
 }
 

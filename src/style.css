@@ -71,6 +71,11 @@ button.ghost {
   outline: 1px solid var(--line);
 }
 
+button.mini {
+  padding: 0.45rem 0.8rem;
+  font-size: 0.86rem;
+}
+
 input,
 select,
 textarea {
@@ -263,10 +268,15 @@ h2 {
   opacity: 0.72;
 }
 
-.message img,
+.message-images {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.message-images img,
 .image-card img {
   width: 100%;
-  margin-top: 12px;
   border-radius: 20px;
 }
 
@@ -276,6 +286,65 @@ h2 {
   gap: 14px;
   align-items: end;
   margin-top: 16px;
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.composer-main {
+  display: grid;
+  gap: 12px;
+}
+
+.composer-previews {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.composer-preview {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 248, 230, 0.7);
+}
+
+.composer-preview img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 16px;
+}
+
+.composer-preview-meta {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-preview-meta span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.86rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-tools {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.composer-hint {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
 }
 
 .image-form {
@@ -348,6 +417,11 @@ h2 {
 
   .toolbar-actions {
     grid-template-columns: 1fr;
+  }
+
+  .composer-tools {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .chat,
