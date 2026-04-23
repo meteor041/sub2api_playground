@@ -193,6 +193,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
+function toAbsoluteAssetUrl(value: string): string {
+  if (/^https?:\/\//i.test(value) || value.startsWith('data:')) {
+    return value
+  }
+  if (value.startsWith('/')) {
+    return `${window.location.origin}${value}`
+  }
+  return value
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -633,7 +643,7 @@ function buildChatMessageInput(message: ChatMessage): Record<string, unknown> {
   for (const attachment of message.attachments) {
     parts.push({
       type: 'input_image',
-      image_url: attachment.dataUrl
+      image_url: toAbsoluteAssetUrl(attachment.dataUrl)
     })
   }
 

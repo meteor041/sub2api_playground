@@ -266,10 +266,6 @@ function dataUrlToBuffer(dataUrl, fallbackMimeType) {
   }
 }
 
-function bufferToDataUrl(buffer, mimeType) {
-  return `data:${mimeType};base64,${buffer.toString('base64')}`
-}
-
 function hashBuffer(buffer) {
   return createHash('sha256').update(buffer).digest('hex')
 }
@@ -318,7 +314,18 @@ async function getAssetByToken(token) {
   return result.rows[0] || null
 }
 
+function assetPublicUrl(token) {
+  return `/api/playground/assets/${token}`
+}
+
 async function persistAsset(userId, kind, namedAsset) {
+  if (namedAsset?.assetToken) {
+    const existing = await getAssetByToken(namedAsset.assetToken)
+    if (existing && Number(existing.user_id) === Number(userId)) {
+      return existing
+    }
+  }
+
   if (!namedAsset?.dataUrl || !String(namedAsset.dataUrl).startsWith('data:')) {
     return null
   }
@@ -357,13 +364,12 @@ async function hydrateAssetRef(assetRef) {
   if (!asset) {
     return null
   }
-  const absolutePath = path.join(assetsRoot, asset.file_path)
-  const buffer = await readFile(absolutePath)
   return {
     id: assetRef.id || asset.id,
     name: assetRef.name || path.basename(asset.file_path),
     mimeType: asset.mime_type,
-    dataUrl: bufferToDataUrl(buffer, asset.mime_type)
+    dataUrl: assetPublicUrl(asset.public_token),
+    assetToken: asset.public_token
   }
 }
 
@@ -571,7 +577,13 @@ async function normalizeStateForStorage(userId, state) {
     let imageAsset = null
     let externalImageUrl = null
     if (typeof message.imageDataUrl === 'string' && message.imageDataUrl.trim()) {
-      if (message.imageDataUrl.startsWith('data:')) {
+      if (message.imageAssetToken) {
+        imageAsset = await persistAsset(userId, 'message-image', {
+          assetToken: message.imageAssetToken,
+          dataUrl: message.imageDataUrl,
+          mimeType: 'image/png'
+        })
+      } else if (message.imageDataUrl.startsWith('data:')) {
         imageAsset = await persistAsset(userId, 'message-image', {
           dataUrl: message.imageDataUrl,
           mimeType: 'image/png'
@@ -595,7 +607,13 @@ async function normalizeStateForStorage(userId, state) {
   const storedGeneratedImages = []
   for (const image of normalized.generatedImages) {
     let asset = null
-    if (typeof image.dataUrl === 'string' && image.dataUrl.startsWith('data:')) {
+    if (image.assetToken) {
+      asset = await persistAsset(userId, 'generated-image', {
+        assetToken: image.assetToken,
+        dataUrl: image.dataUrl,
+        mimeType: 'image/png'
+      })
+    } else if (typeof image.dataUrl === 'string' && image.dataUrl.startsWith('data:')) {
       asset = await persistAsset(userId, 'generated-image', {
         dataUrl: image.dataUrl,
         mimeType: 'image/png'
@@ -641,6 +659,7 @@ async function hydrateConversationState(snapshot) {
     }
 
     let imageDataUrl = message.externalImageUrl || undefined
+    let imageAssetToken
     if (!imageDataUrl && message.imageAssetToken) {
       const hydratedImage = await hydrateAssetRef({
         assetToken: message.imageAssetToken,
@@ -649,6 +668,7 @@ async function hydrateConversationState(snapshot) {
         name: `${message.id}.png`
       })
       imageDataUrl = hydratedImage?.dataUrl
+      imageAssetToken = hydratedImage?.assetToken
     }
 
     chatMessages.push({
@@ -657,13 +677,15 @@ async function hydrateConversationState(snapshot) {
       content: message.content,
       createdAt: Number(message.createdAt) || Date.now(),
       attachments: attachments.length > 0 ? attachments : undefined,
-      imageDataUrl
+      imageDataUrl,
+      imageAssetToken
     })
   }
 
   const generatedImages = []
   for (const image of normalized.generatedImages) {
     let dataUrl
+    let assetToken
     if (image.assetToken) {
       const hydrated = await hydrateAssetRef({
         assetToken: image.assetToken,
@@ -672,6 +694,7 @@ async function hydrateConversationState(snapshot) {
         name: `${image.id}.png`
       })
       dataUrl = hydrated?.dataUrl
+      assetToken = hydrated?.assetToken
     }
 
     generatedImages.push({
@@ -680,7 +703,8 @@ async function hydrateConversationState(snapshot) {
       size: image.size,
       dataUrl,
       remoteUrl: image.remoteUrl || undefined,
-      createdAt: Number(image.createdAt) || Date.now()
+      createdAt: Number(image.createdAt) || Date.now(),
+      assetToken
     })
   }
 
@@ -902,6 +926,24 @@ const server = createServer(async (req, res) => {
       }
       const payload = await loadConversation(user.id, conversationId)
       json(res, 200, { code: 0, message: 'success', data: payload })
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname.startsWith('/api/playground/assets/')) {
+      const token = url.pathname.split('/').pop()
+      if (!token) {
+        throw appError(400, 'Asset token is required')
+      }
+      const asset = await getAssetByToken(token)
+      if (!asset) {
+        throw appError(404, 'Asset not found')
+      }
+      const filePath = path.join(assetsRoot, asset.file_path)
+      res.writeHead(200, {
+        'Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Type': asset.mime_type
+      })
+      createReadStream(filePath).pipe(res)
       return
     }
 
