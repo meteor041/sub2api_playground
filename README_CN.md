@@ -26,21 +26,27 @@ GitHub 仓库地址：
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 npm install
+npm run dev:server
 npm run dev
 ```
 
-开发服务器默认监听 `5174` 端口。
+前端开发服务器默认监听 `5174` 端口。
+本地任务 / 代理服务默认监听 `8081` 端口。
 
-默认情况下，Vite 会把下面这些路径代理到 `http://localhost:8080`：
+默认情况下，Vite 会按下面的规则做代理：
 
+- `/api/playground` -> `http://localhost:8081`
 - `/api/v1`
 - `/v1`
 - `/images`
 
-如果你的后端地址不同，可以覆盖代理目标：
+其中 `/api/v1`、`/v1`、`/images` 默认代理到 `http://localhost:8080`。
+
+如果你的后端地址或本地任务服务地址不同，可以覆盖：
 
 ```bash
 VITE_SUB2API_PROXY_TARGET=http://127.0.0.1:8080 npm run dev
+VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 ```
 
 生产环境下，可以把 `VITE_SUB2API_BASE_URL` 设置为公开的 `sub2api` 地址，或者把这个前端和 `sub2api` 放在同一个反向代理后面。
@@ -53,12 +59,28 @@ sub2api_playground -> sub2api backend -> PostgreSQL / Redis
 
 Playground 本身不会直接连接 PostgreSQL 或 Redis。
 
+## 异步生图任务
+
+手动生图和工具触发的生图现在都会先经过这个仓库内置的轻量 Node BFF：
+
+```text
+浏览器 -> image-playground 任务服务 -> sub2api /v1/images/generations
+```
+
+这样浏览器不会再一直挂着一条面向 Cloudflare 的长生图请求，而是：
+
+1. 先创建任务
+2. 立刻拿到 `task_id`
+3. 轮询任务状态
+4. 完成后再读取图片 URL 或 data URL
+
 ## Docker 部署
 
-Docker 镜像会先构建静态前端，再通过 Nginx 在 `8081` 端口提供服务。
+Docker 镜像会先构建静态前端，再通过内置 Node 任务 / 代理服务在 `8081` 端口提供服务。
 
 它会把以下路径代理到现有的 `sub2api` 服务：
 
+- `/api/playground`
 - `/api/v1`
 - `/v1`
 - `/images`

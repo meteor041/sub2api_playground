@@ -2,7 +2,8 @@
 import { computed, onMounted, ref } from 'vue'
 import {
   createApiKey,
-  generateImage,
+  createImageTask,
+  getImageTask,
   getProfile,
   hasAuthToken,
   listApiKeys,
@@ -11,7 +12,7 @@ import {
   logout,
   sendResponsesRequest
 } from './api'
-import type { ApiKey, ChatImageAttachment, ChatMessage, GeneratedImage, Group, UserProfile } from './types'
+import type { ApiKey, ChatImageAttachment, ChatMessage, GeneratedImage, Group, ImageTaskStatus, UserProfile } from './types'
 
 const textModels = [
   'gpt-5.4',
@@ -82,6 +83,7 @@ const composerFileInput = ref<HTMLInputElement | null>(null)
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
 const imageBusy = ref(false)
+const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
 
 const openAiGroups = computed(() =>
@@ -152,6 +154,10 @@ function triggerDownload(url: string, filename: string): void {
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n/g, '\n')
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
 
 function readFileAsDataUrl(file: File): Promise<string> {
@@ -395,6 +401,40 @@ function buildFunctionCallOutput(images: GeneratedImage[], prompt: string, size:
   })
 }
 
+function describeImageTaskStatus(status: ImageTaskStatus['status']): string {
+  switch (status) {
+    case 'queued':
+      return '生图任务已创建，正在排队...'
+    case 'processing':
+      return '生图任务正在执行...'
+    case 'completed':
+      return '生图任务已完成，正在读取结果...'
+    case 'failed':
+      return '生图任务失败'
+    default:
+      return '生图任务处理中...'
+  }
+}
+
+async function waitForImageTask(
+  taskId: string,
+  onStatus?: (task: ImageTaskStatus) => void
+): Promise<ImageTaskStatus> {
+  const startedAt = Date.now()
+  const timeoutMs = 10 * 60 * 1000
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const task = await getImageTask(taskId)
+    onStatus?.(task)
+    if (task.status === 'completed' || task.status === 'failed') {
+      return task
+    }
+    await sleep(2000)
+  }
+
+  throw new Error('生图任务轮询超时，请稍后刷新页面查看结果。')
+}
+
 function buildChatMessageInput(message: ChatMessage): Record<string, unknown> {
   if (message.role !== 'user' || !message.attachments?.length) {
     return {
@@ -604,14 +644,28 @@ async function handleSendChat(): Promise<void> {
     imageBusy.value = true
     let images: GeneratedImage[] = []
     try {
-      const imageResponse = await generateImage(apiKey, {
+      const { task_id } = await createImageTask(apiKey, {
         model: imageModel,
         prompt: toolArgs.prompt,
         size: toolArgs.size,
         n: toolArgs.n,
         response_format: 'b64_json'
       })
-      images = extractGeneratedImages(imageResponse, toolArgs.prompt, toolArgs.size)
+      updateChatMessage(assistantMessage.id, {
+        content: `生图任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+      })
+
+      const task = await waitForImageTask(task_id, (nextTask) => {
+        updateChatMessage(assistantMessage.id, {
+          content: describeImageTaskStatus(nextTask.status)
+        })
+      })
+
+      if (task.status === 'failed') {
+        throw new Error(task.error || '图片生成失败')
+      }
+
+      images = extractGeneratedImagesFromTask(task)
     } finally {
       imageBusy.value = false
     }
@@ -684,6 +738,19 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
     .filter((item: GeneratedImage) => item.dataUrl || item.remoteUrl)
 }
 
+function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[] {
+  return (task.result?.images || [])
+    .map((item) => ({
+      id: item.id || uid('image'),
+      prompt: item.prompt,
+      size: item.size,
+      dataUrl: item.data_url || undefined,
+      remoteUrl: item.remote_url || undefined,
+      createdAt: Date.now()
+    } satisfies GeneratedImage))
+    .filter((item) => item.dataUrl || item.remoteUrl)
+}
+
 async function handleGenerateImage(): Promise<void> {
   const apiKey = selectedKeySecret.value
   const prompt = imagePrompt.value.trim()
@@ -697,15 +764,25 @@ async function handleGenerateImage(): Promise<void> {
   }
 
   imageBusy.value = true
+  imageTaskLabel.value = '正在创建生图任务...'
   try {
-    const data = await generateImage(apiKey, {
+    const { task_id } = await createImageTask(apiKey, {
       model: imageModel,
       prompt,
       size: imageSize.value,
       n: 1,
       response_format: 'b64_json'
     })
-    const images = extractGeneratedImages(data, prompt, imageSize.value)
+    imageTaskLabel.value = `任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+
+    const task = await waitForImageTask(task_id, (nextTask) => {
+      imageTaskLabel.value = describeImageTaskStatus(nextTask.status)
+    })
+    if (task.status === 'failed') {
+      throw new Error(task.error || '图片生成失败')
+    }
+
+    const images = extractGeneratedImagesFromTask(task)
     if (images.length === 0) {
       throw new Error('图片生成成功，但响应中没有可展示的图片。')
     }
@@ -724,6 +801,7 @@ async function handleGenerateImage(): Promise<void> {
     setError(error instanceof Error ? error.message : '图片生成失败')
   } finally {
     imageBusy.value = false
+    imageTaskLabel.value = ''
   }
 }
 
@@ -915,7 +993,7 @@ onMounted(async () => {
               />
             </label>
             <button :disabled="imageBusy || !selectedKeySecret" type="submit">
-              {{ imageBusy ? '生成中...' : '生成图片' }}
+              {{ imageBusy ? imageTaskLabel || '生成中...' : '生成图片' }}
             </button>
           </form>
 

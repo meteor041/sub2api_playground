@@ -26,21 +26,25 @@ This project runs on a separate port, but it still relies on the existing `sub2a
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 npm install
+npm run dev:server
 npm run dev
 ```
 
-The dev server listens on port `5174`.
+The frontend dev server listens on port `5174`.
+The local task/proxy server listens on port `8081`.
 
-By default, Vite proxies these paths to `http://localhost:8080`:
+By default, Vite proxies these paths:
 
-- `/api/v1`
-- `/v1`
-- `/images`
+- `/api/playground` -> `http://localhost:8081`
+- `/api/v1` -> `http://localhost:8080`
+- `/v1` -> `http://localhost:8080`
+- `/images` -> `http://localhost:8080`
 
-If your backend runs elsewhere, override the proxy target:
+If your backend or local task server runs elsewhere, override the proxy target:
 
 ```bash
 VITE_SUB2API_PROXY_TARGET=http://127.0.0.1:8080 npm run dev
+VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 ```
 
 For production, set `VITE_SUB2API_BASE_URL` to the public `sub2api` origin, or serve this app behind the same reverse proxy as `sub2api`.
@@ -53,12 +57,28 @@ sub2api_playground -> sub2api backend -> PostgreSQL / Redis
 
 The playground does not connect to PostgreSQL or Redis directly.
 
+## Async Image Tasks
+
+Manual image generation and tool-triggered image generation now run through a lightweight Node BFF inside this repository:
+
+```text
+browser -> image-playground task server -> sub2api /v1/images/generations
+```
+
+The browser no longer holds one long Cloudflare-facing image request open. It now:
+
+1. Creates a task
+2. Receives `task_id` immediately
+3. Polls task status
+4. Reads image URLs or data URLs after completion
+
 ## Docker Deployment
 
-The Docker image builds the static frontend and serves it with Nginx on port `8081`.
+The Docker image builds the static frontend and serves it with the built-in Node task/proxy server on port `8081`.
 
 It proxies these paths to the existing `sub2api` service:
 
+- `/api/playground`
 - `/api/v1`
 - `/v1`
 - `/images`

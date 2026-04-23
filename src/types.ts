@@ -74,3 +74,25 @@ export interface GeneratedImage {
   remoteUrl?: string
   createdAt: number
 }
+
+export interface ImageTaskResultItem {
+  id: string
+  prompt: string
+  size: string
+  data_url: string | null
+  remote_url: string | null
+}
+
+export interface ImageTaskResult {
+  images: ImageTaskResultItem[]
+  raw?: unknown
+}
+
+export interface ImageTaskStatus {
+  task_id: string
+  status: 'queued' | 'processing' | 'completed' | 'failed'
+  created_at: string
+  updated_at: string
+  error: string | null
+  result: ImageTaskResult | null
+}

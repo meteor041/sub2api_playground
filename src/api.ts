@@ -1,4 +1,4 @@
-import type { ApiKey, Group, LoginResponse, PaginatedResponse, UserProfile } from './types'
+import type { ApiKey, Group, ImageTaskStatus, LoginResponse, PaginatedResponse, UserProfile } from './types'
 
 const baseUrl = (import.meta.env.VITE_SUB2API_BASE_URL || '').replace(/\/$/, '')
 
@@ -317,4 +317,21 @@ export async function generateImage(
     throw new Error(extractError(data, `Image request failed: HTTP ${response.status}`))
   }
   return data
+}
+
+export function createImageTask(
+  apiKey: string,
+  payload: Record<string, unknown>
+): Promise<{ task_id: string; status: string }> {
+  return request<{ task_id: string; status: string }>('/api/playground/tasks', {
+    method: 'POST',
+    body: JSON.stringify({
+      api_key: apiKey,
+      payload
+    })
+  })
+}
+
+export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
+  return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
 }
