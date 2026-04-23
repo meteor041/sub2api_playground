@@ -121,11 +121,11 @@ SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.ym
 
 ## Domain Proxy
 
-For `playground.meteor041.com`, point the domain to `http://127.0.0.1:8081` through your reverse proxy or Cloudflare Tunnel.
+For `playground.example.com`, point the domain to `http://127.0.0.1:8081` through your reverse proxy or Cloudflare Tunnel.
 
 If you use Cloudflare Tunnel, add a public hostname:
 
-- Hostname: `playground.meteor041.com`
+- Hostname: `playground.example.com`
 - Service: `http://127.0.0.1:8081`
 
 With Cloudflare Tunnel, you usually do not need to open an inbound firewall port for `8081`.
@@ -137,3 +137,9 @@ If you expose `8081` directly, open TCP `8081` in both the server firewall and t
 - The current backend image model name is `gpt-image-2`. If you want to display `image-gpt-2` in the UI, keep it as a display alias and still send `gpt-image-2` to the backend.
 - The current MVP lets the browser call the gateway with a selected user API key. For production hardening, add a JWT-authenticated BFF so the browser never sees API keys.
 - This repository is published separately, but it is designed to work with an existing `sub2api` deployment instead of replacing it.
+
+## Try It Online
+
+If you want to try a live deployment, you are welcome to visit:
+
+- https://playground.meteor041.com

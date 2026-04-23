@@ -121,11 +121,11 @@ SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.ym
 
 ## 域名代理
 
-如果你要使用 `playground.meteor041.com`，可以在反向代理或 Cloudflare Tunnel 中把它指向 `http://127.0.0.1:8081`。
+如果你要使用 `playground.example.com`，可以在反向代理或 Cloudflare Tunnel 中把它指向 `http://127.0.0.1:8081`。
 
 如果使用 Cloudflare Tunnel，可以添加一个公开域名：
 
-- Hostname: `playground.meteor041.com`
+- Hostname: `playground.example.com`
 - Service: `http://127.0.0.1:8081`
 
 在 Cloudflare Tunnel 场景下，通常不需要额外开放 `8081` 入站端口。
@@ -137,3 +137,9 @@ SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.ym
 - 当前后端图片模型名称是 `gpt-image-2`。如果前端想展示成 `image-gpt-2`，可以只做显示别名，实际请求仍然发送 `gpt-image-2`。
 - 当前 MVP 版本允许浏览器直接使用用户选择的 API Key 调用网关。若要增强生产安全性，建议增加一个基于 JWT 的 BFF，避免浏览器直接接触 API Key。
 - 这个仓库是独立发布的，但它的定位是配合现有 `sub2api` 部署使用，而不是替代 `sub2api`。
+
+## 在线体验
+
+如果你想直接体验已经部署好的版本，也欢迎来玩：
+
+- https://playground.meteor041.com
