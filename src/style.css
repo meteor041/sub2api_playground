@@ -274,6 +274,11 @@ h2 {
   margin-top: 12px;
 }
 
+.message-image-card {
+  display: grid;
+  gap: 10px;
+}
+
 .message-images img,
 .image-card img {
   width: 100%;
@@ -385,6 +390,14 @@ h2 {
   font-size: 0.85rem;
 }
 
+.image-card-footer {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+
 .toast {
   position: fixed;
   right: 24px;
@@ -431,5 +444,10 @@ h2 {
 
   .message {
     max-width: 100%;
+  }
+
+  .image-card-footer {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }

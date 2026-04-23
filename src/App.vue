@@ -126,6 +126,30 @@ function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
+function sanitizeFilenamePart(value: string): string {
+  return value
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48)
+}
+
+function buildImageFilename(seed: string, index = 1): string {
+  const safeSeed = sanitizeFilenamePart(seed) || 'playground-image'
+  return `${safeSeed}-${index}.png`
+}
+
+function triggerDownload(url: string, filename: string): void {
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  anchor.rel = 'noopener noreferrer'
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+}
+
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n/g, '\n')
 }
@@ -428,6 +452,32 @@ function messageImages(message: ChatMessage): string[] {
     images.push(message.imageDataUrl)
   }
   return images
+}
+
+async function downloadImage(source: string, filenameSeed: string, index = 1): Promise<void> {
+  const filename = buildImageFilename(filenameSeed, index)
+  try {
+    if (source.startsWith('data:')) {
+      triggerDownload(source, filename)
+      return
+    }
+
+    const response = await fetch(source)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+
+    const blob = await response.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    try {
+      triggerDownload(objectUrl, filename)
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+    }
+  } catch {
+    window.open(source, '_blank', 'noopener,noreferrer')
+    setError('无法直接下载该图片，已为你打开原图链接。')
+  }
 }
 
 function openComposerFilePicker(): void {
@@ -779,12 +829,23 @@ onMounted(async () => {
               <div class="message-role">{{ message.role === 'user' ? '你' : '模型' }}</div>
               <p v-if="message.content">{{ message.content }}</p>
               <div v-if="messageImages(message).length > 0" class="message-images">
-                <img
-                  v-for="image in messageImages(message)"
+                <div
+                  v-for="(image, index) in messageImages(message)"
                   :key="image"
-                  :src="image"
-                  :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
-                />
+                  class="message-image-card"
+                >
+                  <img
+                    :src="image"
+                    :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
+                  />
+                  <button
+                    class="ghost mini"
+                    type="button"
+                    @click="downloadImage(image, message.content || `${message.role}-image`, index + 1)"
+                  >
+                    下载图片
+                  </button>
+                </div>
               </div>
             </article>
           </div>
@@ -862,7 +923,16 @@ onMounted(async () => {
             <article v-for="image in generatedImages" :key="image.id" class="image-card">
               <img v-if="image.dataUrl || image.remoteUrl" :src="image.dataUrl || image.remoteUrl" :alt="image.prompt" />
               <p>{{ image.prompt }}</p>
-              <span>{{ image.size }}</span>
+              <div class="image-card-footer">
+                <span>{{ image.size }}</span>
+                <button
+                  class="ghost mini"
+                  type="button"
+                  @click="downloadImage(image.dataUrl || image.remoteUrl || '', image.prompt)"
+                >
+                  下载图片
+                </button>
+              </div>
             </article>
           </div>
         </aside>
