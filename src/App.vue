@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import logoUrl from '../asset/logo.png'
 import {
   createConversation,
   createApiKey,
@@ -227,6 +228,18 @@ function setError(message: string): void {
 function setSuccess(message: string): void {
   successMessage.value = message
   errorMessage.value = ''
+}
+
+function applyBranding(): void {
+  document.title = 'Sub2API Image Playground'
+
+  let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
+  if (!favicon) {
+    favicon = document.createElement('link')
+    favicon.rel = 'icon'
+    document.head.appendChild(favicon)
+  }
+  favicon.href = logoUrl
 }
 
 function sortConversations(items: ConversationSummary[]): ConversationSummary[] {
@@ -1017,6 +1030,7 @@ async function refreshBalanceOnly(): Promise<void> {
 }
 
 onMounted(async () => {
+  applyBranding()
   if (isAuthenticated.value) {
     await refreshWorkspace()
     await ensureConversationLoaded()
@@ -1028,7 +1042,10 @@ onMounted(async () => {
   <main class="shell">
     <section class="hero">
       <div>
-        <p class="eyebrow">Sub2API Parallel Lab</p>
+        <div class="hero-brand">
+          <img class="hero-logo" :src="logoUrl" alt="Sub2API logo" />
+          <p class="eyebrow">Sub2API Parallel Lab</p>
+        </div>
         <h1>对话和生图 Playground</h1>
         <p class="hero-copy">
           独立端口运行，复用 sub2api 的用户、余额、API Key、调度和扣费链路。

@@ -131,6 +131,23 @@ h2 {
   margin-bottom: 24px;
 }
 
+.hero-brand {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  margin-bottom: 0.7rem;
+}
+
+.hero-logo {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 22px;
+  border: 1px solid rgba(23, 35, 27, 0.14);
+  box-shadow: 0 16px 36px rgba(39, 75, 55, 0.16);
+  background: rgba(255, 248, 230, 0.85);
+}
+
 .hero-copy {
   max-width: 620px;
   margin-top: 22px;
@@ -426,6 +443,10 @@ h2 {
   .workspace,
   .composer {
     grid-template-columns: 1fr;
+  }
+
+  .hero-brand {
+    align-items: flex-start;
   }
 
   .toolbar-actions {
