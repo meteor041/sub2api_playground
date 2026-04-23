@@ -205,6 +205,30 @@ function buildConversationInput(): Array<{ role: string; content: string }> {
     }))
 }
 
+function updateChatMessage(id: string, updates: Partial<ChatMessage>): void {
+  const index = chatMessages.value.findIndex((message) => message.id === id)
+  if (index < 0) {
+    return
+  }
+  const current = chatMessages.value[index]
+  chatMessages.value.splice(index, 1, {
+    ...current,
+    ...updates
+  })
+}
+
+function appendChatMessageContent(id: string, delta: string): void {
+  const index = chatMessages.value.findIndex((message) => message.id === id)
+  if (index < 0) {
+    return
+  }
+  const current = chatMessages.value[index]
+  chatMessages.value.splice(index, 1, {
+    ...current,
+    content: `${current.content}${delta}`
+  })
+}
+
 async function handleSendChat(): Promise<void> {
   const apiKey = selectedKeySecret.value
   const content = chatInput.value.trim()
@@ -241,13 +265,15 @@ async function handleSendChat(): Promise<void> {
       input: conversationInput
     }, (delta) => {
       if (!receivedText) {
-        assistantMessage.content = ''
+        updateChatMessage(assistantMessage.id, { content: '' })
         receivedText = true
       }
-      assistantMessage.content += delta
+      appendChatMessageContent(assistantMessage.id, delta)
     })
     if (!receivedText) {
-      assistantMessage.content = extractResponseText(data) || '（模型没有返回文本）'
+      updateChatMessage(assistantMessage.id, {
+        content: extractResponseText(data) || '（模型没有返回文本）'
+      })
     }
     await refreshBalanceOnly()
   } catch (error) {
