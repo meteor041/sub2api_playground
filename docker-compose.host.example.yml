@@ -1,0 +1,13 @@
+services:
+  image-playground:
+    build:
+      context: .
+      args:
+        VITE_SUB2API_BASE_URL: ${VITE_SUB2API_BASE_URL:-}
+    image: sub2api-image-playground:latest
+    container_name: sub2api-image-playground
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      # Use this when sub2api itself is also running with Docker host networking.
+      - SUB2API_UPSTREAM=${SUB2API_UPSTREAM:-http://127.0.0.1:8080}

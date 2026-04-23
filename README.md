@@ -46,6 +46,46 @@ It also proxies these paths to the existing `sub2api` container:
 - `/v1`
 - `/images`
 
+No PostgreSQL or Redis settings are needed here. The request flow is:
+
+```text
+image-playground -> sub2api backend -> PostgreSQL / Redis
+```
+
+### Host Network Deployment
+
+Use this mode if your existing `sub2api` container is running with Docker host networking.
+
+Check that `sub2api` is reachable from the host:
+
+```bash
+curl -fsS http://127.0.0.1:8080/health
+```
+
+Check that the playground port is free:
+
+```bash
+ss -ltnp | grep ':8081' || true
+```
+
+Deploy:
+
+```bash
+git clone <your-image-playground-repo-url>
+cd image-playground
+SUB2API_UPSTREAM=http://127.0.0.1:8080 docker compose -f docker-compose.host.example.yml up -d --build
+```
+
+Verify:
+
+```bash
+curl -fsS http://127.0.0.1:8081/health
+```
+
+### Bridge Network Deployment
+
+Use this mode only if `sub2api` and `image-playground` share a Docker bridge network.
+
 Find the Docker network used by your existing `sub2api` deployment:
 
 ```bash
@@ -74,11 +114,18 @@ If your `sub2api` container has a different name or URL, override the upstream:
 SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.yml up -d --build
 ```
 
-No PostgreSQL or Redis settings are needed here. The request flow is:
+## Domain Proxy
 
-```text
-image-playground -> sub2api backend -> PostgreSQL / Redis
-```
+For `playground.meteor041.com`, point the domain to `http://127.0.0.1:8081` in your reverse proxy or Cloudflare Tunnel.
+
+If you use Cloudflare Tunnel, add a public hostname:
+
+- Hostname: `playground.meteor041.com`
+- Service: `http://127.0.0.1:8081`
+
+With Cloudflare Tunnel, you usually do not need to open an inbound firewall port for `8081`.
+
+If you expose `8081` directly, open TCP `8081` in both the server firewall and the cloud provider security group.
 
 ## Notes
 
