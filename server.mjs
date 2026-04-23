@@ -1,7 +1,7 @@
 import { createServer } from 'node:http'
 import { randomUUID } from 'node:crypto'
 import { createReadStream, existsSync } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -50,7 +50,7 @@ function parseJsonBody(req) {
 
     req.on('data', (chunk) => {
       total += chunk.length
-      if (total > 2 * 1024 * 1024) {
+      if (total > 50 * 1024 * 1024) {
         reject(new Error('Request body too large'))
         req.destroy()
         return
@@ -127,19 +127,84 @@ function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
   }
 }
 
+function dataUrlToBlob(dataUrl, fallbackMimeType) {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/i.exec(String(dataUrl || ''))
+  if (!match) {
+    throw new Error('Invalid image data_url')
+  }
+
+  const mimeType = match[1] || fallbackMimeType || 'application/octet-stream'
+  const rawData = match[3] || ''
+  const buffer = Buffer.from(rawData, match[2] ? 'base64' : 'utf8')
+  return new Blob([buffer], { type: mimeType })
+}
+
+function normalizeTaskPayload(payload) {
+  const mode = payload?.mode === 'edit' ? 'edit' : 'generate'
+  const prompt = typeof payload?.prompt === 'string' ? payload.prompt.trim() : ''
+  const size = typeof payload?.size === 'string' ? payload.size.trim() : ''
+  const model = typeof payload?.model === 'string' ? payload.model.trim() : ''
+  const responseFormat = typeof payload?.response_format === 'string' ? payload.response_format.trim() : 'b64_json'
+  const n = Number.isInteger(payload?.n) && payload.n > 0 ? payload.n : 1
+  const images = Array.isArray(payload?.images) ? payload.images : []
+
+  return {
+    mode,
+    prompt,
+    size,
+    model,
+    response_format: responseFormat,
+    n,
+    images
+  }
+}
+
+async function callImageUpstream(task) {
+  if (task.payload.mode === 'edit') {
+    const form = new FormData()
+    form.set('model', task.payload.model)
+    form.set('prompt', task.payload.prompt)
+    form.set('size', task.payload.size)
+    form.set('n', String(task.payload.n))
+    form.set('response_format', task.payload.response_format)
+
+    for (const [index, image] of task.payload.images.entries()) {
+      const blob = dataUrlToBlob(image?.data_url, image?.mime_type)
+      const filename = typeof image?.name === 'string' && image.name.trim() ? image.name.trim() : `edit-source-${index + 1}.png`
+      form.append('image', blob, filename)
+    }
+
+    return fetch(`${upstream}/v1/images/edits`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${task.apiKey}`
+      },
+      body: form
+    })
+  }
+
+  return fetch(`${upstream}/v1/images/generations`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${task.apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: task.payload.model,
+      prompt: task.payload.prompt,
+      size: task.payload.size,
+      n: task.payload.n,
+      response_format: task.payload.response_format
+    })
+  })
+}
+
 async function runImageTask(task) {
   task.status = 'processing'
   task.updatedAt = nowIso()
 
   try {
-    const response = await fetch(`${upstream}/v1/images/generations`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${task.apiKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(task.payload)
-    })
+    const response = await callImageUpstream(task)
 
     const text = await response.text()
     let data = null
@@ -171,16 +236,26 @@ async function runImageTask(task) {
 
 function createImageTask(body) {
   const apiKey = typeof body?.api_key === 'string' ? body.api_key.trim() : ''
-  const payload = body?.payload && typeof body.payload === 'object' ? body.payload : null
+  const rawPayload = body?.payload && typeof body.payload === 'object' ? body.payload : null
 
   if (!apiKey) {
     throw new Error('api_key is required')
   }
-  if (!payload) {
+  if (!rawPayload) {
     throw new Error('payload is required')
   }
+  const payload = normalizeTaskPayload(rawPayload)
   if (typeof payload.prompt !== 'string' || !payload.prompt.trim()) {
     throw new Error('payload.prompt is required')
+  }
+  if (!payload.model) {
+    throw new Error('payload.model is required')
+  }
+  if (!payload.size) {
+    throw new Error('payload.size is required')
+  }
+  if (payload.mode === 'edit' && payload.images.length === 0) {
+    throw new Error('payload.images is required for edit mode')
   }
 
   const id = randomUUID()

@@ -52,11 +52,19 @@ const imageGenerationTool = {
     additionalProperties: false
   }
 }
+const imageEditingTool = {
+  type: 'function',
+  name: 'edit_image',
+  description: 'Edit the user-provided image when the user uploaded an image and wants changes applied to it.',
+  parameters: imageGenerationTool.parameters
+}
 const imageToolInstructions = [
   'You are a helpful assistant.',
   'Reply in Chinese unless the user asks for another language.',
-  'When the user explicitly asks you to create, draw, generate, render, illustrate, or make an image, call generate_image instead of only describing the prompt.',
-  'Only call generate_image at most once in a single turn.',
+  'When the user explicitly asks you to create, draw, generate, render, illustrate, or make an image, call an image tool instead of only describing the prompt.',
+  'If the user uploaded image(s), you must call edit_image so the uploaded image is modified rather than merely described.',
+  'If the user did not upload any image, call generate_image.',
+  'Only call one image tool at most once in a single turn.',
   'If no image is needed, answer normally.'
 ].join(' ')
 
@@ -85,6 +93,8 @@ const imageSize = ref(imageSizes[0])
 const imageBusy = ref(false)
 const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
+const imageSource = ref<ChatImageAttachment | null>(null)
+const imageSourceInput = ref<HTMLInputElement | null>(null)
 
 const openAiGroups = computed(() =>
   groups.value.filter((group) => group.platform === 'openai' && group.status === 'active')
@@ -122,6 +132,10 @@ interface GenerateImageToolArgs {
   prompt: string
   size: string
   n: number
+}
+
+type ImageTaskPayload = Record<string, unknown> & {
+  mode: 'generate' | 'edit'
 }
 
 function uid(prefix: string): string {
@@ -249,6 +263,7 @@ async function handleLogout(): Promise<void> {
   if (composerFileInput.value) {
     composerFileInput.value.value = ''
   }
+  clearManualImageSource()
   generatedImages.value = []
 }
 
@@ -435,6 +450,38 @@ async function waitForImageTask(
   throw new Error('生图任务轮询超时，请稍后刷新页面查看结果。')
 }
 
+function buildImageTaskPayload(
+  prompt: string,
+  size: string,
+  sourceImages: ChatImageAttachment[] = []
+): ImageTaskPayload {
+  const trimmedPrompt = prompt.trim()
+  if (sourceImages.length > 0) {
+    return {
+      mode: 'edit',
+      model: imageModel,
+      prompt: trimmedPrompt,
+      size,
+      n: 1,
+      response_format: 'b64_json',
+      images: sourceImages.map((image) => ({
+        name: image.name,
+        mime_type: image.mimeType,
+        data_url: image.dataUrl
+      }))
+    }
+  }
+
+  return {
+    mode: 'generate',
+    model: imageModel,
+    prompt: trimmedPrompt,
+    size,
+    n: 1,
+    response_format: 'b64_json'
+  }
+}
+
 function buildChatMessageInput(message: ChatMessage): Record<string, unknown> {
   if (message.role !== 'user' || !message.attachments?.length) {
     return {
@@ -484,6 +531,32 @@ function updateChatMessage(id: string, updates: Partial<ChatMessage>): void {
 
 function removeComposerImage(id: string): void {
   composerImages.value = composerImages.value.filter((image) => image.id !== id)
+}
+
+function clearManualImageSource(): void {
+  imageSource.value = null
+  if (imageSourceInput.value) {
+    imageSourceInput.value.value = ''
+  }
+}
+
+function openManualImagePicker(): void {
+  imageSourceInput.value?.click()
+}
+
+async function handleManualImageChange(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (!file) {
+    return
+  }
+  try {
+    imageSource.value = await createChatImageAttachment(file)
+    errorMessage.value = ''
+  } catch (error) {
+    clearManualImageSource()
+    setError(error instanceof Error ? error.message : '读取编辑原图失败')
+  }
 }
 
 function messageImages(message: ChatMessage): string[] {
@@ -613,7 +686,7 @@ async function handleSendChat(): Promise<void> {
       model: selectedTextModel.value,
       instructions: imageToolInstructions,
       input: conversationInput,
-      tools: [imageGenerationTool],
+      tools: [imageGenerationTool, imageEditingTool],
       tool_choice: 'auto'
     })
     ensureResponseSucceeded(initialResponse)
@@ -632,27 +705,29 @@ async function handleSendChat(): Promise<void> {
     }
 
     const functionCall = functionCalls[0]
-    if (functionCall.name !== 'generate_image') {
+    if (functionCall.name !== 'generate_image' && functionCall.name !== 'edit_image') {
       throw new Error(`模型尝试调用未受支持的工具：${functionCall.name}`)
     }
 
     const toolArgs = parseGenerateImageToolArgs(functionCall)
+    const shouldEditSourceImage = attachments.length > 0
     updateChatMessage(assistantMessage.id, {
-      content: `模型已决定调用生图工具，正在生成 ${toolArgs.size} 图片...`
+      content: shouldEditSourceImage
+        ? `模型已决定编辑你上传的图片，正在生成 ${toolArgs.size} 结果...`
+        : `模型已决定调用生图工具，正在生成 ${toolArgs.size} 图片...`
     })
 
     imageBusy.value = true
     let images: GeneratedImage[] = []
     try {
-      const { task_id } = await createImageTask(apiKey, {
-        model: imageModel,
-        prompt: toolArgs.prompt,
-        size: toolArgs.size,
-        n: toolArgs.n,
-        response_format: 'b64_json'
-      })
+      const { task_id } = await createImageTask(
+        apiKey,
+        buildImageTaskPayload(toolArgs.prompt, toolArgs.size, shouldEditSourceImage ? attachments : [])
+      )
       updateChatMessage(assistantMessage.id, {
-        content: `生图任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+        content: shouldEditSourceImage
+          ? `编辑任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+          : `生图任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
       })
 
       const task = await waitForImageTask(task_id, (nextTask) => {
@@ -694,7 +769,7 @@ async function handleSendChat(): Promise<void> {
       ensureResponseSucceeded(finalResponse)
       finalMessage = extractResponseText(finalResponse) || finalMessage
     } catch (error) {
-      setError(error instanceof Error ? `图片已生成，但模型总结失败：${error.message}` : '图片已生成，但模型总结失败')
+      setError(error instanceof Error ? `图片已处理，但模型总结失败：${error.message}` : '图片已处理，但模型总结失败')
     }
 
     updateChatMessage(assistantMessage.id, {
@@ -754,6 +829,7 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
 async function handleGenerateImage(): Promise<void> {
   const apiKey = selectedKeySecret.value
   const prompt = imagePrompt.value.trim()
+  const sourceImages = imageSource.value ? [{ ...imageSource.value }] : []
   if (!apiKey) {
     setError('请先选择或创建一个 OpenAI 分组 API Key。')
     return
@@ -764,16 +840,12 @@ async function handleGenerateImage(): Promise<void> {
   }
 
   imageBusy.value = true
-  imageTaskLabel.value = '正在创建生图任务...'
+  imageTaskLabel.value = sourceImages.length > 0 ? '正在创建图片编辑任务...' : '正在创建生图任务...'
   try {
-    const { task_id } = await createImageTask(apiKey, {
-      model: imageModel,
-      prompt,
-      size: imageSize.value,
-      n: 1,
-      response_format: 'b64_json'
-    })
-    imageTaskLabel.value = `任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+    const { task_id } = await createImageTask(apiKey, buildImageTaskPayload(prompt, imageSize.value, sourceImages))
+    imageTaskLabel.value = sourceImages.length > 0
+      ? `编辑任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+      : `任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
 
     const task = await waitForImageTask(task_id, (nextTask) => {
       imageTaskLabel.value = describeImageTaskStatus(nextTask.status)
@@ -790,15 +862,16 @@ async function handleGenerateImage(): Promise<void> {
     chatMessages.value.push({
       id: uid('assistant-image'),
       role: 'assistant',
-      content: `已根据提示词生成图片：${prompt}`,
+      content: sourceImages.length > 0 ? `已按要求编辑图片：${prompt}` : `已根据提示词生成图片：${prompt}`,
       createdAt: Date.now(),
       imageDataUrl: images[0].dataUrl || images[0].remoteUrl
     })
     imagePrompt.value = ''
-    setSuccess('图片生成完成，余额已刷新。')
+    clearManualImageSource()
+    setSuccess(sourceImages.length > 0 ? '图片编辑完成，余额已刷新。' : '图片生成完成，余额已刷新。')
     await refreshBalanceOnly()
   } catch (error) {
-    setError(error instanceof Error ? error.message : '图片生成失败')
+    setError(error instanceof Error ? error.message : (sourceImages.length > 0 ? '图片编辑失败' : '图片生成失败'))
   } finally {
     imageBusy.value = false
     imageTaskLabel.value = ''
@@ -978,22 +1051,52 @@ onMounted(async () => {
           </div>
 
           <form class="image-form" @submit.prevent="handleGenerateImage">
+            <input
+              ref="imageSourceInput"
+              class="composer-file-input"
+              type="file"
+              accept="image/*"
+              @change="handleManualImageChange"
+            />
             <label>
               图片尺寸
               <select v-model="imageSize">
                 <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
               </select>
             </label>
+            <div class="composer-tools">
+              <button class="secondary" type="button" :disabled="imageBusy" @click="openManualImagePicker">
+                {{ imageSource ? '更换原图' : '上传原图' }}
+              </button>
+              <button
+                v-if="imageSource"
+                class="ghost"
+                type="button"
+                :disabled="imageBusy"
+                @click="clearManualImageSource"
+              >
+                清除原图
+              </button>
+            </div>
+            <article v-if="imageSource" class="composer-preview">
+              <img :src="imageSource.dataUrl" :alt="imageSource.name" />
+              <div class="composer-preview-meta">
+                <span>{{ imageSource.name }}</span>
+                <span>已上传原图，提交后会进入图片编辑模式。</span>
+              </div>
+            </article>
             <label>
-              提示词
+              {{ imageSource ? '编辑指令' : '提示词' }}
               <textarea
                 v-model="imagePrompt"
                 rows="7"
-                placeholder="例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒、强烈构图"
+                :placeholder="imageSource
+                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道，并提升整体电影感'
+                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒、强烈构图'"
               />
             </label>
             <button :disabled="imageBusy || !selectedKeySecret" type="submit">
-              {{ imageBusy ? imageTaskLabel || '生成中...' : '生成图片' }}
+              {{ imageBusy ? imageTaskLabel || '处理中...' : (imageSource ? '编辑图片' : '生成图片') }}
             </button>
           </form>
 
