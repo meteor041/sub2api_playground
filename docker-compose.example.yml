@@ -1,0 +1,23 @@
+services:
+  image-playground:
+    build:
+      context: .
+      args:
+        VITE_SUB2API_BASE_URL: ${VITE_SUB2API_BASE_URL:-}
+    image: sub2api-image-playground:latest
+    container_name: sub2api-image-playground
+    restart: unless-stopped
+    ports:
+      - "${PLAYGROUND_BIND_HOST:-0.0.0.0}:${PLAYGROUND_PORT:-8081}:8081"
+    environment:
+      # Use the sub2api container name when both services share one Docker network.
+      - SUB2API_UPSTREAM=${SUB2API_UPSTREAM:-http://sub2api:8080}
+    networks:
+      - sub2api-network
+
+networks:
+  sub2api-network:
+    external: true
+    # If your sub2api compose project is named differently, override this:
+    # SUB2API_DOCKER_NETWORK=your_network_name docker compose -f docker-compose.example.yml up -d
+    name: ${SUB2API_DOCKER_NETWORK:-deploy_sub2api-network}

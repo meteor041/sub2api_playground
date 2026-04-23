@@ -1,0 +1,12 @@
+.git/
+node_modules/
+dist/
+.env
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
