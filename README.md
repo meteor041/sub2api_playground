@@ -52,10 +52,12 @@ For production, set `VITE_SUB2API_BASE_URL` to the public `sub2api` origin, or s
 ## Request Flow
 
 ```text
-sub2api_playground -> sub2api backend -> PostgreSQL / Redis
+browser -> image-playground Node BFF -> sub2api backend
+                              |-> local PostgreSQL
+                              |-> mounted playground data directory
 ```
 
-The playground does not connect to PostgreSQL or Redis directly.
+The browser does not connect to PostgreSQL directly. Conversation metadata is stored in the local PostgreSQL you provide through `DATABASE_URL`, while large payloads are written to the mounted playground data directory.
 
 ## Async Image Tasks
 
@@ -71,6 +73,13 @@ The browser no longer holds one long Cloudflare-facing image request open. It no
 2. Receives `task_id` immediately
 3. Polls task status
 4. Reads image URLs or data URLs after completion
+
+## Persistence Model
+
+- Conversation metadata is stored in local PostgreSQL.
+- Conversation snapshots are stored as JSON files under `PLAYGROUND_DATA_DIR`.
+- Uploaded images and generated images are stored as files under `PLAYGROUND_DATA_DIR`.
+- Rebuilding the Docker image does not wipe data as long as PostgreSQL data and `./data/playground` are preserved.
 
 ## Docker Deployment
 
@@ -93,12 +102,14 @@ Check that `sub2api` is reachable from the host:
 curl -fsS http://127.0.0.1:8080/health
 ```
 
-Clone and start the playground:
+Prepare a local PostgreSQL database first, for example `sub2api_playground`, then clone and start the playground:
 
 ```bash
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
-SUB2API_UPSTREAM=http://127.0.0.1:8080 docker compose -f docker-compose.host.example.yml up -d --build
+SUB2API_UPSTREAM=http://127.0.0.1:8080 \
+DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/sub2api_playground?sslmode=disable \
+docker compose -f docker-compose.host.example.yml up -d --build
 ```
 
 Verify:
@@ -119,12 +130,14 @@ docker network ls
 
 If you deployed `sub2api` from its `deploy/` folder, the network is commonly named `deploy_sub2api-network`.
 
-Clone and start the playground:
+Prepare a local PostgreSQL database first, then clone and start the playground:
 
 ```bash
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
-SUB2API_DOCKER_NETWORK=deploy_sub2api-network docker compose -f docker-compose.example.yml up -d --build
+SUB2API_DOCKER_NETWORK=deploy_sub2api-network \
+DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
+docker compose -f docker-compose.example.yml up -d --build
 ```
 
 Then open:
@@ -136,8 +149,16 @@ http://your-server-ip:8081
 If your `sub2api` container uses a different hostname or upstream URL, override it:
 
 ```bash
-SUB2API_UPSTREAM=http://sub2api:8080 docker compose -f docker-compose.example.yml up -d --build
+SUB2API_UPSTREAM=http://sub2api:8080 \
+DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
+docker compose -f docker-compose.example.yml up -d --build
 ```
+
+The mounted `./data/playground` directory now contains:
+
+- conversation snapshot JSON files
+- uploaded source images
+- generated result images
 
 ## Domain Proxy
 

@@ -12,6 +12,7 @@
     "typecheck": "vue-tsc --noEmit"
   },
   "dependencies": {
+    "pg": "^8.20.0",
     "vue": "^3.4.0"
   },
   "devDependencies": {

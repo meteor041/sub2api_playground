@@ -96,3 +96,19 @@ export interface ImageTaskStatus {
   error: string | null
   result: ImageTaskResult | null
 }
+
+export interface ConversationSummary {
+  id: string
+  title: string
+  createdAt: string
+  updatedAt: string
+  lastMessageAt?: string | null
+}
+
+export interface ConversationPayload {
+  conversation: ConversationSummary
+  state: {
+    chatMessages: ChatMessage[]
+    generatedImages: GeneratedImage[]
+  }
+}

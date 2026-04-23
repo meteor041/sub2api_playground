@@ -1,4 +1,13 @@
-import type { ApiKey, Group, ImageTaskStatus, LoginResponse, PaginatedResponse, UserProfile } from './types'
+import type {
+  ApiKey,
+  ConversationPayload,
+  ConversationSummary,
+  Group,
+  ImageTaskStatus,
+  LoginResponse,
+  PaginatedResponse,
+  UserProfile
+} from './types'
 
 const baseUrl = (import.meta.env.VITE_SUB2API_BASE_URL || '').replace(/\/$/, '')
 
@@ -334,4 +343,32 @@ export function createImageTask(
 
 export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
   return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export function listConversations(): Promise<ConversationSummary[]> {
+  return request<ConversationSummary[]>('/api/playground/conversations')
+}
+
+export function createConversation(title = ''): Promise<ConversationSummary> {
+  return request<ConversationSummary>('/api/playground/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ title })
+  })
+}
+
+export function getConversation(conversationId: string): Promise<ConversationPayload> {
+  return request<ConversationPayload>(`/api/playground/conversations/${encodeURIComponent(conversationId)}`)
+}
+
+export function saveConversationState(
+  conversationId: string,
+  payload: { chatMessages: unknown[]; generatedImages: unknown[] }
+): Promise<{ savedAt: string; title: string }> {
+  return request<{ savedAt: string; title: string }>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}`,
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }
+  )
 }

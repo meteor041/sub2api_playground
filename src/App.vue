@@ -1,18 +1,31 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import {
+  createConversation,
   createApiKey,
   createImageTask,
+  getConversation,
   getImageTask,
   getProfile,
   hasAuthToken,
+  listConversations,
   listApiKeys,
   listAvailableGroups,
   login,
   logout,
+  saveConversationState,
   sendResponsesRequest
 } from './api'
-import type { ApiKey, ChatImageAttachment, ChatMessage, GeneratedImage, Group, ImageTaskStatus, UserProfile } from './types'
+import type {
+  ApiKey,
+  ChatImageAttachment,
+  ChatMessage,
+  ConversationSummary,
+  GeneratedImage,
+  Group,
+  ImageTaskStatus,
+  UserProfile
+} from './types'
 
 const textModels = [
   'gpt-5.4',
@@ -25,6 +38,7 @@ const textModels = [
 const imageModel = 'gpt-image-2'
 const imageSizes = ['1024x1024', '1536x1024', '1024x1536']
 const maxImageToolCallsPerTurn = 1
+const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
 const imageGenerationTool = {
   type: 'function',
   name: 'generate_image',
@@ -80,6 +94,10 @@ const profile = ref<UserProfile | null>(null)
 const apiKeys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const selectedApiKeyId = ref<number | null>(null)
+const conversations = ref<ConversationSummary[]>([])
+const currentConversationId = ref('')
+const conversationBusy = ref(false)
+const conversationSaving = ref(false)
 
 const selectedTextModel = ref(textModels[0])
 const chatInput = ref('')
@@ -211,6 +229,108 @@ function setSuccess(message: string): void {
   errorMessage.value = ''
 }
 
+function sortConversations(items: ConversationSummary[]): ConversationSummary[] {
+  return [...items].sort((left, right) => {
+    const leftTime = Date.parse(left.updatedAt || left.createdAt || '')
+    const rightTime = Date.parse(right.updatedAt || right.createdAt || '')
+    return rightTime - leftTime
+  })
+}
+
+function persistActiveConversationId(conversationId: string): void {
+  currentConversationId.value = conversationId
+  if (conversationId) {
+    localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId)
+  } else {
+    localStorage.removeItem(ACTIVE_CONVERSATION_KEY)
+  }
+}
+
+function resetConversationState(): void {
+  conversations.value = []
+  persistActiveConversationId('')
+  chatMessages.value = []
+  generatedImages.value = []
+}
+
+async function refreshConversationIndex(): Promise<void> {
+  conversations.value = sortConversations(await listConversations())
+}
+
+async function loadConversationById(conversationId: string): Promise<void> {
+  conversationBusy.value = true
+  try {
+    const payload = await getConversation(conversationId)
+    persistActiveConversationId(payload.conversation.id)
+    chatMessages.value = payload.state.chatMessages || []
+    generatedImages.value = payload.state.generatedImages || []
+  } finally {
+    conversationBusy.value = false
+  }
+}
+
+async function startNewConversation(): Promise<void> {
+  conversationBusy.value = true
+  try {
+    const created = await createConversation()
+    conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
+    persistActiveConversationId(created.id)
+    chatMessages.value = []
+    generatedImages.value = []
+  } finally {
+    conversationBusy.value = false
+  }
+}
+
+async function ensureConversationLoaded(): Promise<void> {
+  await refreshConversationIndex()
+
+  const savedConversationId = localStorage.getItem(ACTIVE_CONVERSATION_KEY) || ''
+  const preferredConversation = conversations.value.find((item) => item.id === savedConversationId) || conversations.value[0] || null
+
+  if (!preferredConversation) {
+    await startNewConversation()
+    return
+  }
+
+  await loadConversationById(preferredConversation.id)
+}
+
+async function persistConversationSnapshot(): Promise<void> {
+  if (!currentConversationId.value || !isAuthenticated.value) {
+    return
+  }
+
+  conversationSaving.value = true
+  try {
+    const result = await saveConversationState(currentConversationId.value, {
+      chatMessages: chatMessages.value,
+      generatedImages: generatedImages.value
+    })
+    conversations.value = sortConversations(conversations.value.map((conversation) => (
+      conversation.id === currentConversationId.value
+        ? {
+          ...conversation,
+          title: result.title,
+          updatedAt: result.savedAt,
+          lastMessageAt: result.savedAt
+        }
+        : conversation
+    )))
+  } catch {
+    // Saving should be best-effort so local UI progress is not interrupted.
+  } finally {
+    conversationSaving.value = false
+  }
+}
+
+async function handleConversationSelect(): Promise<void> {
+  if (!currentConversationId.value) {
+    return
+  }
+  await loadConversationById(currentConversationId.value)
+}
+
 async function refreshWorkspace(): Promise<void> {
   loadingApp.value = true
   try {
@@ -243,6 +363,7 @@ async function handleLogin(): Promise<void> {
     isAuthenticated.value = true
     setSuccess('登录成功，正在加载 Playground。')
     await refreshWorkspace()
+    await ensureConversationLoaded()
   } catch (error) {
     setError(error instanceof Error ? error.message : '登录失败')
   } finally {
@@ -258,13 +379,12 @@ async function handleLogout(): Promise<void> {
   groups.value = []
   selectedApiKeyId.value = null
   chatInput.value = ''
-  chatMessages.value = []
   composerImages.value = []
   if (composerFileInput.value) {
     composerFileInput.value.value = ''
   }
   clearManualImageSource()
-  generatedImages.value = []
+  resetConversationState()
 }
 
 async function handleCreateApiKey(): Promise<void> {
@@ -648,6 +768,9 @@ async function handleComposerPaste(event: ClipboardEvent): Promise<void> {
 }
 
 async function handleSendChat(): Promise<void> {
+  if (!currentConversationId.value) {
+    await startNewConversation()
+  }
   const apiKey = selectedKeySecret.value
   const content = chatInput.value.trim()
   const attachments = composerImages.value.map((image) => ({ ...image }))
@@ -701,6 +824,7 @@ async function handleSendChat(): Promise<void> {
         content: extractResponseText(initialResponse) || '（模型没有返回文本）'
       })
       await refreshBalanceOnly()
+      await persistConversationSnapshot()
       return
     }
 
@@ -780,10 +904,12 @@ async function handleSendChat(): Promise<void> {
       setSuccess('模型已自动调用生图工具并完成生成。')
     }
     await refreshBalanceOnly()
+    await persistConversationSnapshot()
   } catch (error) {
     chatMessages.value = chatMessages.value.filter((message) => message.id !== assistantMessage.id)
     setError(error instanceof Error ? error.message : '对话请求失败')
     imageBusy.value = false
+    await persistConversationSnapshot()
   } finally {
     chatBusy.value = false
   }
@@ -827,6 +953,9 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
 }
 
 async function handleGenerateImage(): Promise<void> {
+  if (!currentConversationId.value) {
+    await startNewConversation()
+  }
   const apiKey = selectedKeySecret.value
   const prompt = imagePrompt.value.trim()
   const sourceImages = imageSource.value ? [{ ...imageSource.value }] : []
@@ -870,6 +999,7 @@ async function handleGenerateImage(): Promise<void> {
     clearManualImageSource()
     setSuccess(sourceImages.length > 0 ? '图片编辑完成，余额已刷新。' : '图片生成完成，余额已刷新。')
     await refreshBalanceOnly()
+    await persistConversationSnapshot()
   } catch (error) {
     setError(error instanceof Error ? error.message : (sourceImages.length > 0 ? '图片编辑失败' : '图片生成失败'))
   } finally {
@@ -889,6 +1019,7 @@ async function refreshBalanceOnly(): Promise<void> {
 onMounted(async () => {
   if (isAuthenticated.value) {
     await refreshWorkspace()
+    await ensureConversationLoaded()
   }
 })
 </script>
@@ -940,11 +1071,19 @@ onMounted(async () => {
           <p>文字对话和图片生成都会通过这个 Key 进入现有网关并扣费。</p>
         </div>
         <div class="toolbar-actions">
+          <select v-model="currentConversationId" :disabled="conversationBusy || conversations.length === 0" @change="handleConversationSelect">
+            <option v-for="conversation in conversations" :key="conversation.id" :value="conversation.id">
+              {{ conversation.title }}
+            </option>
+          </select>
           <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
             <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
               {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
             </option>
           </select>
+          <button class="secondary" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
+            新建会话
+          </button>
           <button class="secondary" type="button" :disabled="loadingApp" @click="refreshWorkspace">
             {{ loadingApp ? '刷新中...' : '刷新' }}
           </button>
@@ -968,7 +1107,10 @@ onMounted(async () => {
           </div>
 
           <div class="messages">
-            <article v-if="chatMessages.length === 0" class="empty">
+            <article v-if="conversationBusy" class="empty">
+              正在加载会话...
+            </article>
+            <article v-else-if="chatMessages.length === 0" class="empty">
               先试一句：“帮我构思一张电影海报的提示词”。
             </article>
             <article
