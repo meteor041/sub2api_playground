@@ -46,6 +46,16 @@ const maxImageToolCallsPerTurn = 1
 const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
 const THEME_MODE_KEY = 'playground_theme_mode'
+const galleryPreviewWidth = 480
+const conversationPreviewWidth = 960
+const modalPreviewWidth = 1280
+const imageExtensionByMime: Record<string, string> = {
+  'image/gif': '.gif',
+  'image/jpeg': '.jpg',
+  'image/jpg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp'
+}
 const imageGenerationTool = {
   type: 'function',
   name: 'generate_image',
@@ -210,6 +220,7 @@ interface PendingImageTask {
 interface DisplayImageSource {
   src: string
   fallbackSrc: string
+  downloadSrc: string
 }
 
 function uid(prefix: string): string {
@@ -225,9 +236,31 @@ function sanitizeFilenamePart(value: string): string {
     .slice(0, 48)
 }
 
-function buildImageFilename(seed: string, index = 1): string {
+function buildImageFilename(seed: string, index = 1, extension = '.png'): string {
   const safeSeed = sanitizeFilenamePart(seed) || 'playground-image'
-  return `${safeSeed}-${index}.png`
+  return `${safeSeed}-${index}${extension}`
+}
+
+function inferImageExtension(source: string, mimeType = ''): string {
+  const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() || ''
+  if (normalizedMimeType && imageExtensionByMime[normalizedMimeType]) {
+    return imageExtensionByMime[normalizedMimeType]
+  }
+  if (source.startsWith('data:')) {
+    const dataMimeType = source.slice(5, source.indexOf(';')).trim().toLowerCase()
+    if (dataMimeType && imageExtensionByMime[dataMimeType]) {
+      return imageExtensionByMime[dataMimeType]
+    }
+  }
+  const match = source.match(/\.([a-z0-9]+)(?:[?#]|$)/i)
+  const ext = match ? `.${match[1].toLowerCase()}` : ''
+  if (ext === '.jpeg') {
+    return '.jpg'
+  }
+  if (ext && ['.gif', '.jpg', '.png', '.webp'].includes(ext)) {
+    return ext
+  }
+  return '.png'
 }
 
 function imageShareKey(image: GeneratedImage, index = 0): string {
@@ -251,12 +284,33 @@ function imageSourceUrl(image: GeneratedImage): string {
   return image.image_url || image.dataUrl || image.remoteUrl || ''
 }
 
+function buildCompressedPreviewUrl(source: string, width = galleryPreviewWidth): string {
+  if (!source || source.startsWith('data:')) {
+    return source
+  }
+  const safeWidth = Number.isFinite(width) && width > 0 ? Math.round(width) : galleryPreviewWidth
+  const absoluteSource = toAbsoluteAssetUrl(source)
+  if (!/^https?:\/\//i.test(absoluteSource)) {
+    return source
+  }
+  return `/cdn-cgi/image/width=${safeWidth},quality=70,format=webp,fit=scale-down/${absoluteSource}`
+}
+
+function imagePreviewUrl(image: GeneratedImage, width = conversationPreviewWidth): string {
+  const originalSource = imageSourceUrl(image)
+  return buildCompressedPreviewUrl(originalSource, width) || originalSource
+}
+
 function imageFallbackUrl(image: GeneratedImage): string {
   return image.dataUrl || (image.assetToken ? `/api/playground/assets/${image.assetToken}` : '') || image.remoteUrl || ''
 }
 
 function galleryImageUrl(item: GalleryItem): string {
-  return item.image_url || item.thumbnailUrl || item.imageUrl || item.originalUrl || ''
+  return item.thumbnailUrl || buildCompressedPreviewUrl(item.image_url || item.originalUrl || '', galleryPreviewWidth) || item.image_url || item.imageUrl || item.originalUrl || ''
+}
+
+function galleryModalUrl(item: GalleryItem): string {
+  return buildCompressedPreviewUrl(item.image_url || item.originalUrl || '', modalPreviewWidth) || item.originalUrl || galleryImageUrl(item)
 }
 
 function galleryFallbackUrl(item: GalleryItem): string {
@@ -309,14 +363,15 @@ function syncGalleryColumnCount(): void {
   galleryColumnCount.value = resolveGalleryColumnCount(window.innerWidth)
 }
 
-function buildDisplayImageSource(primary?: string, fallback?: string): DisplayImageSource | null {
-  const src = primary || fallback || ''
-  if (!src) {
+function buildDisplayImageSource(primary?: string, fallback?: string, width = conversationPreviewWidth): DisplayImageSource | null {
+  const downloadSrc = primary || fallback || ''
+  if (!downloadSrc) {
     return null
   }
   return {
-    src,
-    fallbackSrc: fallback || src
+    src: buildCompressedPreviewUrl(downloadSrc, width) || downloadSrc,
+    fallbackSrc: fallback || downloadSrc,
+    downloadSrc
   }
 }
 
@@ -1112,9 +1167,9 @@ async function handleManualImageChange(event: Event): Promise<void> {
 
 function messageImages(message: ChatMessage): DisplayImageSource[] {
   const images = (message.attachments || [])
-    .map((image) => buildDisplayImageSource(image.image_url, image.dataUrl))
+    .map((image) => buildDisplayImageSource(image.image_url, image.dataUrl, conversationPreviewWidth))
     .filter((image): image is DisplayImageSource => Boolean(image))
-  const inlineImage = buildDisplayImageSource(message.image_url, message.imageDataUrl)
+  const inlineImage = buildDisplayImageSource(message.image_url, message.imageDataUrl, conversationPreviewWidth)
   if (inlineImage) {
     images.push(inlineImage)
   }
@@ -1122,9 +1177,9 @@ function messageImages(message: ChatMessage): DisplayImageSource[] {
 }
 
 async function downloadImage(source: string, filenameSeed: string, index = 1): Promise<void> {
-  const filename = buildImageFilename(filenameSeed, index)
   try {
     if (source.startsWith('data:')) {
+      const filename = buildImageFilename(filenameSeed, index, inferImageExtension(source))
       triggerDownload(source, filename)
       return
     }
@@ -1136,6 +1191,7 @@ async function downloadImage(source: string, filenameSeed: string, index = 1): P
 
     const blob = await response.blob()
     const objectUrl = URL.createObjectURL(blob)
+    const filename = buildImageFilename(filenameSeed, index, inferImageExtension(source, blob.type))
     try {
       triggerDownload(objectUrl, filename)
     } finally {
@@ -1879,7 +1935,7 @@ onBeforeUnmount(() => {
                   <button
                     class="ghost mini"
                     type="button"
-                    @click="downloadImage(image.src, message.content || `${message.role}-image`, index + 1)"
+                    @click="downloadImage(image.downloadSrc, message.content || `${message.role}-image`, index + 1)"
                   >
                     下载图片
                   </button>
@@ -2052,7 +2108,7 @@ onBeforeUnmount(() => {
             >
               <img
                 v-if="imageSourceUrl(image)"
-                :src="imageSourceUrl(image)"
+                :src="imagePreviewUrl(image, galleryPreviewWidth)"
                 :alt="image.prompt"
                 loading="lazy"
                 @error="handleGeneratedImageError($event, image)"
@@ -2108,7 +2164,7 @@ onBeforeUnmount(() => {
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-wrap">
           <img
-            :src="selectedImage ? imageSourceUrl(selectedImage) : (selectedGalleryItem ? galleryImageUrl(selectedGalleryItem) : '')"
+            :src="selectedImage ? imagePreviewUrl(selectedImage, modalPreviewWidth) : (selectedGalleryItem ? galleryModalUrl(selectedGalleryItem) : '')"
             :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
             loading="lazy"
             @error="selectedImage

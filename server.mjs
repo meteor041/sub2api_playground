@@ -497,7 +497,7 @@ function cloudflareImageUrl(req, value, width = thumbnailWidth) {
   if (!/^https?:\/\//i.test(originalUrl)) {
     return value
   }
-  return `/cdn-cgi/image/width=${safeWidth},quality=70,format=auto,fit=scale-down/${originalUrl}`
+  return `/cdn-cgi/image/width=${safeWidth},quality=70,format=webp,fit=scale-down/${originalUrl}`
 }
 
 async function persistAsset(userId, kind, namedAsset) {
