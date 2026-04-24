@@ -933,23 +933,57 @@ h2 {
 
 .toast {
   position: fixed;
-  right: 24px;
-  bottom: 24px;
-  z-index: 10;
-  max-width: min(520px, calc(100% - 48px));
-  border-radius: 20px;
-  padding: 14px 18px;
-  box-shadow: var(--shadow);
+  top: 22px;
+  left: 50%;
+  z-index: 30;
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  width: min(640px, calc(100% - 48px));
+  border-radius: 22px;
+  padding: 14px 14px 14px 18px;
+  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+  transform: translateX(-50%);
+  backdrop-filter: blur(18px);
 }
 
 .toast.error {
   color: #fff;
-  background: var(--danger);
+  background: rgba(180, 35, 24, 0.94);
 }
 
 .toast.success {
   color: #fff;
-  background: var(--success);
+  background: rgba(24, 121, 78, 0.94);
+}
+
+.toast span {
+  min-width: 0;
+  line-height: 1.5;
+}
+
+.toast-close {
+  display: inline-grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  color: currentColor;
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
+  outline: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.toast-close svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 @media (max-width: 1180px) {

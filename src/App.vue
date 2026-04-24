@@ -1914,7 +1914,21 @@ onMounted(async () => {
       </article>
     </div>
 
-    <p v-if="errorMessage" class="toast error">{{ errorMessage }}</p>
-    <p v-if="successMessage" class="toast success">{{ successMessage }}</p>
+    <div v-if="errorMessage" class="toast error" role="alert">
+      <span>{{ errorMessage }}</span>
+      <button class="toast-close" type="button" aria-label="关闭错误提示" @click="errorMessage = ''">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
+    <div v-if="successMessage" class="toast success" role="status">
+      <span>{{ successMessage }}</span>
+      <button class="toast-close" type="button" aria-label="关闭成功提示" @click="successMessage = ''">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      </button>
+    </div>
   </main>
 </template>
