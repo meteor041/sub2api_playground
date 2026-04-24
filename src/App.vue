@@ -1782,11 +1782,6 @@ onBeforeUnmount(() => {
 
     <section v-if="activeView === 'gallery'" class="page gallery-page">
       <header class="page-header">
-        <div>
-          <p class="eyebrow">Public Gallery</p>
-          <h1>共享灵感画廊</h1>
-          <p>这里展示所有用户转发的生成图片，游客也可以浏览。</p>
-        </div>
         <button class="ghost" type="button" :disabled="galleryBusy" @click="refreshGallery">
           {{ galleryBusy ? '刷新中...' : '刷新画廊' }}
         </button>
