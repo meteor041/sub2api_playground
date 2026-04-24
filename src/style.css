@@ -975,13 +975,22 @@ h2 {
 
 .modal-copy {
   display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   align-content: start;
   gap: 14px;
-  overflow: auto;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px 10px 12px 6px;
 }
 
-.modal-copy p:not(.eyebrow) {
+.modal-prompt-scroll {
+  min-height: 0;
+  max-height: min(420px, calc(100vh - 250px));
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.modal-prompt-scroll p {
   color: var(--ink);
   line-height: 1.72;
   white-space: pre-wrap;

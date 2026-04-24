@@ -1912,18 +1912,22 @@ onMounted(async () => {
             :src="selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.imageUrl"
             :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
           />
-          <div v-if="selectedImage" class="modal-actions">
+          <div class="modal-actions">
             <button
               class="icon-button"
               type="button"
               aria-label="下载图片"
-              @click="downloadImage(imageSourceUrl(selectedImage), selectedImage.prompt)"
+              @click="downloadImage(
+                selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.imageUrl || '',
+                selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
+              )"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
               </svg>
             </button>
             <button
+              v-if="selectedImage"
               class="icon-button"
               type="button"
               :class="{ shared: isImageShared(selectedImage, selectedImageIndex) }"
@@ -1943,7 +1947,9 @@ onMounted(async () => {
         <div class="modal-copy">
           <p class="eyebrow">Prompt</p>
           <h2>{{ selectedImage?.size || selectedGalleryItem?.size }}</h2>
-          <p>{{ selectedImage?.prompt || selectedGalleryItem?.prompt }}</p>
+          <div class="modal-prompt-scroll">
+            <p>{{ selectedImage?.prompt || selectedGalleryItem?.prompt }}</p>
+          </div>
           <small>
             {{ selectedImage
               ? new Date(selectedImage.createdAt).toLocaleString()
