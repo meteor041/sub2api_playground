@@ -11,8 +11,15 @@ services:
     environment:
       # Use this when sub2api itself is also running with Docker host networking.
       - SUB2API_UPSTREAM=${SUB2API_UPSTREAM:-http://127.0.0.1:8080}
+      - PLAYGROUND_IMAGE_CDN_BASE=${PLAYGROUND_IMAGE_CDN_BASE:-https://img.meteor041.com/meteor-images}
       - PLAYGROUND_ENABLE_CF_IMAGE_RESIZING=${PLAYGROUND_ENABLE_CF_IMAGE_RESIZING:-false}
       - PLAYGROUND_PUBLIC_ORIGIN=${PLAYGROUND_PUBLIC_ORIGIN:-}
+      - R2_ENDPOINT=${R2_ENDPOINT:-}
+      - R2_BUCKET=${R2_BUCKET:-meteor-images}
+      - R2_REGION=${R2_REGION:-auto}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID:-}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY:-}
+      - PLAYGROUND_KEEP_LOCAL_ASSETS=${PLAYGROUND_KEEP_LOCAL_ASSETS:-false}
       - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/sub2api_playground?sslmode=disable}
       - PLAYGROUND_DATA_DIR=/data/playground
     volumes:

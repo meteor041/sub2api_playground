@@ -5,6 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { Pool } from 'pg'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -14,6 +15,13 @@ const port = Number.parseInt(process.env.PORT || '8081', 10)
 const upstream = (process.env.METEORAPI_UPSTREAM || process.env.SUB2API_UPSTREAM || 'https://meteor041.com').replace(/\/$/, '')
 const publicOrigin = (process.env.PLAYGROUND_PUBLIC_ORIGIN || '').replace(/\/$/, '')
 const imageCdnBase = (process.env.PLAYGROUND_IMAGE_CDN_BASE || 'https://img.meteor041.com/meteor-images').replace(/\/$/, '')
+const r2Endpoint = (process.env.R2_ENDPOINT || '').replace(/\/$/, '')
+const r2Bucket = String(process.env.R2_BUCKET || '').trim()
+const r2Region = String(process.env.R2_REGION || 'auto').trim() || 'auto'
+const r2AccessKeyId = String(process.env.R2_ACCESS_KEY_ID || '').trim()
+const r2SecretAccessKey = String(process.env.R2_SECRET_ACCESS_KEY || '').trim()
+const keepLocalAssets = process.env.PLAYGROUND_KEEP_LOCAL_ASSETS === 'true'
+const r2Configured = Boolean(r2Endpoint && r2Bucket && r2AccessKeyId && r2SecretAccessKey)
 const cloudflareImageResizingEnabled = process.env.PLAYGROUND_ENABLE_CF_IMAGE_RESIZING === 'true'
 const thumbnailWidth = Number.parseInt(process.env.PLAYGROUND_THUMBNAIL_WIDTH || '480', 10)
 const staticRoot = path.join(__dirname, 'dist')
@@ -30,6 +38,17 @@ const authUserCacheTtlMs = 60 * 1000
 const db = process.env.DATABASE_URL
   ? new Pool({
     connectionString: process.env.DATABASE_URL
+  })
+  : null
+
+const r2Client = r2Configured
+  ? new S3Client({
+    region: r2Region,
+    endpoint: r2Endpoint,
+    credentials: {
+      accessKeyId: r2AccessKeyId,
+      secretAccessKey: r2SecretAccessKey
+    }
   })
   : null
 
@@ -81,6 +100,10 @@ function getErrorStatus(error) {
 async function ensureRuntime() {
   await mkdir(conversationsRoot, { recursive: true })
   await mkdir(assetsRoot, { recursive: true })
+
+  if (!r2Configured && (r2Endpoint || r2Bucket || r2AccessKeyId || r2SecretAccessKey)) {
+    console.warn('R2 is partially configured; asset writes will stay on local disk until all R2_* variables are set.')
+  }
 
   if (!db) {
     console.warn('DATABASE_URL is not set; conversation persistence is disabled.')
@@ -400,6 +423,46 @@ function resolveImageUrl(assetToken, remoteUrl) {
   return directUrl || null
 }
 
+function shouldKeepLocalAssetCopy() {
+  return !r2Configured || keepLocalAssets
+}
+
+function assetAbsolutePath(filePath) {
+  return path.join(assetsRoot, filePath)
+}
+
+async function writeLocalAssetFile(filePath, buffer) {
+  const absolutePath = assetAbsolutePath(filePath)
+  await ensureParentDir(absolutePath)
+  await writeFile(absolutePath, buffer)
+}
+
+async function uploadAssetToR2(token, buffer, mimeType) {
+  if (!r2Client || !r2Bucket) {
+    return
+  }
+  const key = String(token || '').trim()
+  if (!key) {
+    throw appError(500, 'Asset token is required for R2 upload')
+  }
+  await r2Client.send(new PutObjectCommand({
+    Bucket: r2Bucket,
+    Key: key,
+    Body: buffer,
+    ContentType: mimeType,
+    CacheControl: 'public, max-age=31536000, immutable'
+  }))
+}
+
+async function persistAssetBinary(asset, buffer, mimeType) {
+  if (r2Configured) {
+    await uploadAssetToR2(asset.public_token, buffer, mimeType)
+  }
+  if (shouldKeepLocalAssetCopy()) {
+    await writeLocalAssetFile(asset.file_path, buffer)
+  }
+}
+
 function absolutePublicUrl(req, value) {
   if (/^https?:\/\//i.test(value)) {
     return value
@@ -425,21 +488,32 @@ function cloudflareImageUrl(req, value, width = thumbnailWidth) {
 }
 
 async function persistAsset(userId, kind, namedAsset) {
+  let buffer = null
+  let mimeType = ''
+  if (namedAsset?.dataUrl && String(namedAsset.dataUrl).startsWith('data:')) {
+    const parsed = dataUrlToBuffer(namedAsset.dataUrl, namedAsset.mimeType)
+    buffer = parsed.buffer
+    mimeType = parsed.mimeType
+  }
+
   if (namedAsset?.assetToken) {
     const existing = await getAssetByToken(namedAsset.assetToken)
     if (existing && Number(existing.user_id) === Number(userId)) {
+      if (buffer) {
+        await persistAssetBinary(existing, buffer, mimeType || existing.mime_type)
+      }
       return existing
     }
   }
 
-  if (!namedAsset?.dataUrl || !String(namedAsset.dataUrl).startsWith('data:')) {
+  if (!buffer) {
     return null
   }
 
-  const { buffer, mimeType } = dataUrlToBuffer(namedAsset.dataUrl, namedAsset.mimeType)
   const sha256 = hashBuffer(buffer)
   const existing = await findAssetByHash(userId, sha256)
   if (existing) {
+    await persistAssetBinary(existing, buffer, mimeType || existing.mime_type)
     return existing
   }
 
@@ -447,9 +521,18 @@ async function persistAsset(userId, kind, namedAsset) {
   const token = randomUUID()
   const extension = extFromMime(mimeType)
   const relativePath = path.join(String(userId), kind, `${assetId}${extension}`)
-  const absolutePath = path.join(assetsRoot, relativePath)
-  await ensureParentDir(absolutePath)
-  await writeFile(absolutePath, buffer)
+  const assetRecord = {
+    id: assetId,
+    user_id: userId,
+    kind,
+    file_path: relativePath,
+    mime_type: mimeType,
+    size_bytes: buffer.length,
+    sha256,
+    public_token: token
+  }
+
+  await persistAssetBinary(assetRecord, buffer, mimeType)
 
   const pool = requireDb()
   const result = await pool.query(
@@ -1419,7 +1502,23 @@ const server = createServer(async (req, res) => {
       if (!asset) {
         throw appError(404, 'Asset not found')
       }
-      const filePath = path.join(assetsRoot, asset.file_path)
+      const filePath = assetAbsolutePath(asset.file_path)
+      if (!existsSync(filePath)) {
+        if (!r2Configured) {
+          throw appError(404, 'Asset file not found')
+        }
+        const redirectUrl = assetImageUrl(asset.public_token)
+        if (!redirectUrl) {
+          throw appError(404, 'Asset file not found')
+        }
+        res.writeHead(307, {
+          'Cache-Control': 'public, max-age=31536000, immutable',
+          'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+          Location: redirectUrl
+        })
+        res.end()
+        return
+      }
       res.writeHead(200, {
         'Cache-Control': 'public, max-age=31536000, immutable',
         'CDN-Cache-Control': 'public, max-age=31536000, immutable',

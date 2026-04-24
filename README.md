@@ -59,6 +59,8 @@ browser -> image-playground Node BFF -> sub2api backend
 
 The browser does not connect to PostgreSQL directly. Conversation metadata is stored in the local PostgreSQL you provide through `DATABASE_URL`, while large payloads are written to the mounted playground data directory.
 
+If `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` are all configured, uploaded images and generated images are also written to Cloudflare R2. The object key is the asset `public_token`, and `PLAYGROUND_IMAGE_CDN_BASE` should point to the public CDN prefix for that bucket.
+
 ## Async Image Tasks
 
 Manual image generation and tool-triggered image generation now run through a lightweight Node BFF inside this repository:
@@ -78,7 +80,8 @@ The browser no longer holds one long Cloudflare-facing image request open. It no
 
 - Conversation metadata is stored in local PostgreSQL.
 - Conversation snapshots are stored as JSON files under `PLAYGROUND_DATA_DIR`.
-- Uploaded images and generated images are stored as files under `PLAYGROUND_DATA_DIR`.
+- Uploaded images and generated images are written to Cloudflare R2 when `R2_*` is configured.
+- `PLAYGROUND_DATA_DIR` still stores conversation JSON files, and it can optionally keep a local asset fallback copy when `PLAYGROUND_KEEP_LOCAL_ASSETS=true`.
 - Rebuilding the Docker image does not wipe data as long as PostgreSQL data and `./data/playground` are preserved.
 
 ## Docker Deployment
@@ -108,6 +111,11 @@ Prepare a local PostgreSQL database first, for example `sub2api_playground`, the
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 SUB2API_UPSTREAM=http://127.0.0.1:8080 \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.host.example.yml up -d --build
 ```
@@ -136,6 +144,11 @@ Prepare a local PostgreSQL database first, then clone and start the playground:
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 SUB2API_DOCKER_NETWORK=deploy_sub2api-network \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.example.yml up -d --build
 ```
@@ -150,6 +163,11 @@ If your `sub2api` container uses a different hostname or upstream URL, override 
 
 ```bash
 SUB2API_UPSTREAM=http://sub2api:8080 \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.example.yml up -d --build
 ```
@@ -157,8 +175,21 @@ docker compose -f docker-compose.example.yml up -d --build
 The mounted `./data/playground` directory now contains:
 
 - conversation snapshot JSON files
-- uploaded source images
-- generated result images
+- optional local asset fallback copies when `PLAYGROUND_KEEP_LOCAL_ASSETS=true`
+
+## R2 Configuration
+
+Set these environment variables on the Node server container:
+
+- `PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images`
+- `R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`
+- `R2_BUCKET=meteor-images`
+- `R2_REGION=auto`
+- `R2_ACCESS_KEY_ID=...`
+- `R2_SECRET_ACCESS_KEY=...`
+- `PLAYGROUND_KEEP_LOCAL_ASSETS=false`
+
+When `R2_*` is complete, the service uploads asset bytes to R2 during `persistAsset()`. The old `/api/playground/assets/:token` route still works: it serves the local copy when present and otherwise redirects to the CDN URL.
 
 ## Domain Proxy
 

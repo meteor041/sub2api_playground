@@ -61,6 +61,8 @@ VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 
 浏览器本身不会直接连接 PostgreSQL。会话元数据会写入你通过 `DATABASE_URL` 提供的本地 PostgreSQL，大体积内容则写到挂载的 `PLAYGROUND_DATA_DIR` 目录。
 
+如果同时配置了 `R2_ENDPOINT`、`R2_BUCKET`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，用户上传图片和生成结果图片也会写入 Cloudflare R2。对象 key 使用资产的 `public_token`，而 `PLAYGROUND_IMAGE_CDN_BASE` 应该指向这个 bucket 对外提供的 CDN 前缀。
+
 ## 异步生图任务
 
 手动生图和工具触发的生图现在都会先经过这个仓库内置的轻量 Node BFF：
@@ -80,7 +82,8 @@ VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 
 - 会话元数据写入本地 PostgreSQL
 - 会话快照以 JSON 文件形式写入 `PLAYGROUND_DATA_DIR`
-- 上传图片和生成结果图片以文件形式写入 `PLAYGROUND_DATA_DIR`
+- 配置 `R2_*` 后，上传图片和生成结果图片会写入 Cloudflare R2
+- `PLAYGROUND_DATA_DIR` 仍然保存会话 JSON；如果 `PLAYGROUND_KEEP_LOCAL_ASSETS=true`，也会额外保留本地图片兜底副本
 - 只要 PostgreSQL 数据和 `./data/playground` 目录还在，重新 `docker compose up -d --build` 就不会丢历史
 
 ## Docker 部署
@@ -110,6 +113,11 @@ curl -fsS http://127.0.0.1:8080/health
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 SUB2API_UPSTREAM=http://127.0.0.1:8080 \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@127.0.0.1:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.host.example.yml up -d --build
 ```
@@ -138,6 +146,11 @@ docker network ls
 git clone https://github.com/meteor041/sub2api_playground.git
 cd sub2api_playground
 SUB2API_DOCKER_NETWORK=deploy_sub2api-network \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.example.yml up -d --build
 ```
@@ -152,6 +165,11 @@ http://your-server-ip:8081
 
 ```bash
 SUB2API_UPSTREAM=http://sub2api:8080 \
+PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images \
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com \
+R2_BUCKET=meteor-images \
+R2_ACCESS_KEY_ID=your-access-key-id \
+R2_SECRET_ACCESS_KEY=your-secret-access-key \
 DATABASE_URL=postgres://postgres:postgres@host.docker.internal:5432/sub2api_playground?sslmode=disable \
 docker compose -f docker-compose.example.yml up -d --build
 ```
@@ -159,8 +177,21 @@ docker compose -f docker-compose.example.yml up -d --build
 挂载的 `./data/playground` 目录现在会包含：
 
 - 会话快照 JSON 文件
-- 用户上传的原图
-- 生成或编辑后的结果图
+- 当 `PLAYGROUND_KEEP_LOCAL_ASSETS=true` 时保留的本地图片兜底副本
+
+## R2 配置
+
+在 Node 服务容器上设置这些环境变量：
+
+- `PLAYGROUND_IMAGE_CDN_BASE=https://img.meteor041.com/meteor-images`
+- `R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com`
+- `R2_BUCKET=meteor-images`
+- `R2_REGION=auto`
+- `R2_ACCESS_KEY_ID=...`
+- `R2_SECRET_ACCESS_KEY=...`
+- `PLAYGROUND_KEEP_LOCAL_ASSETS=false`
+
+当 `R2_*` 配置完整后，服务会在 `persistAsset()` 时把图片字节上传到 R2。旧的 `/api/playground/assets/:token` 路由仍然保留：本地文件存在时继续直接返回，不存在时会跳转到 CDN URL。
 
 ## 域名代理
 
