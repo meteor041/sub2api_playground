@@ -284,6 +284,10 @@ function imageSourceUrl(image: GeneratedImage): string {
   return image.image_url || image.dataUrl || image.remoteUrl || ''
 }
 
+function imageDownloadUrl(image: GeneratedImage): string {
+  return imageFallbackUrl(image) || imageSourceUrl(image)
+}
+
 function buildCompressedPreviewUrl(source: string, width = galleryPreviewWidth): string {
   if (!source || source.startsWith('data:')) {
     return source
@@ -364,12 +368,12 @@ function syncGalleryColumnCount(): void {
 }
 
 function buildDisplayImageSource(primary?: string, fallback?: string, width = conversationPreviewWidth): DisplayImageSource | null {
-  const downloadSrc = primary || fallback || ''
+  const downloadSrc = fallback || primary || ''
   if (!downloadSrc) {
     return null
   }
   return {
-    src: buildCompressedPreviewUrl(downloadSrc, width) || downloadSrc,
+    src: buildCompressedPreviewUrl(primary || downloadSrc, width) || primary || downloadSrc,
     fallbackSrc: fallback || downloadSrc,
     downloadSrc
   }
@@ -2120,7 +2124,7 @@ onBeforeUnmount(() => {
                     class="icon-button"
                     type="button"
                     aria-label="下载图片"
-                    @click="downloadImage(imageSourceUrl(image), image.prompt)"
+                    @click="downloadImage(imageDownloadUrl(image), image.prompt)"
                   >
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
@@ -2177,7 +2181,7 @@ onBeforeUnmount(() => {
               type="button"
               aria-label="下载图片"
               @click="downloadImage(
-                selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
+                selectedImage ? imageDownloadUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
                 selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
               )"
             >
