@@ -12,3 +12,5 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 AGENT.md
+run.sh
+data/
