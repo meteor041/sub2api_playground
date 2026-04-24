@@ -329,6 +329,14 @@ h2 {
   padding-bottom: 40px;
 }
 
+.gallery-sentinel {
+  display: grid;
+  place-items: center;
+  min-height: 72px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .gallery-empty {
   display: grid;
   place-items: center;

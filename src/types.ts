@@ -84,6 +84,8 @@ export interface GalleryItem {
   prompt: string
   size: string
   imageUrl: string
+  thumbnailUrl: string
+  originalUrl: string
   sourceConversationId: string
   sourceImageId: string
   sharedByUserId: number
@@ -94,6 +96,12 @@ export interface GalleryItem {
 export interface ShareGalleryResponse {
   item: GalleryItem
   alreadyExists: boolean
+}
+
+export interface GalleryPage {
+  items: GalleryItem[]
+  nextOffset: number | null
+  hasMore: boolean
 }
 
 export interface ImageTaskResultItem {

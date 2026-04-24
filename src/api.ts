@@ -2,6 +2,7 @@ import type {
   ApiKey,
   ConversationPayload,
   ConversationSummary,
+  GalleryPage,
   GalleryItem,
   Group,
   ImageTaskStatus,
@@ -347,8 +348,8 @@ export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
   return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
 }
 
-export function listGalleryItems(): Promise<GalleryItem[]> {
-  return request<GalleryItem[]>('/api/playground/gallery', {}, false)
+export function listGalleryItems(offset = 0, limit = 24): Promise<GalleryPage> {
+  return request<GalleryPage>(`/api/playground/gallery?offset=${offset}&limit=${limit}`, {}, false)
 }
 
 export function shareGalleryImage(payload: {

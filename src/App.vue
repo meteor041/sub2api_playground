@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import logoUrl from '../asset/logo.png'
 import {
   createConversation,
@@ -103,6 +103,11 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const galleryItems = ref<GalleryItem[]>([])
 const galleryBusy = ref(false)
+const galleryLoadingMore = ref(false)
+const galleryHasMore = ref(true)
+const galleryNextOffset = ref(0)
+const gallerySentinel = ref<HTMLElement | null>(null)
+let galleryObserver: IntersectionObserver | null = null
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -593,13 +598,54 @@ async function handleCreateApiKey(): Promise<void> {
 
 async function refreshGallery(): Promise<void> {
   galleryBusy.value = true
+  galleryNextOffset.value = 0
+  galleryHasMore.value = true
   try {
-    galleryItems.value = await listGalleryItems()
+    const page = await listGalleryItems(0)
+    galleryItems.value = page.items
+    galleryNextOffset.value = page.nextOffset || galleryItems.value.length
+    galleryHasMore.value = page.hasMore
   } catch (error) {
     setError(error instanceof Error ? error.message : '加载公共画廊失败')
   } finally {
     galleryBusy.value = false
   }
+}
+
+async function loadMoreGallery(): Promise<void> {
+  if (galleryBusy.value || galleryLoadingMore.value || !galleryHasMore.value) {
+    return
+  }
+  galleryLoadingMore.value = true
+  try {
+    const page = await listGalleryItems(galleryNextOffset.value)
+    const existingIds = new Set(galleryItems.value.map((item) => item.id))
+    galleryItems.value = [
+      ...galleryItems.value,
+      ...page.items.filter((item) => !existingIds.has(item.id))
+    ]
+    galleryNextOffset.value = page.nextOffset || galleryItems.value.length
+    galleryHasMore.value = page.hasMore
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '加载更多画廊失败')
+  } finally {
+    galleryLoadingMore.value = false
+  }
+}
+
+function setupGalleryObserver(): void {
+  galleryObserver?.disconnect()
+  if (!gallerySentinel.value) {
+    return
+  }
+  galleryObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      void loadMoreGallery()
+    }
+  }, {
+    rootMargin: '640px 0px'
+  })
+  galleryObserver.observe(gallerySentinel.value)
 }
 
 function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
@@ -608,9 +654,9 @@ function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): bool
   }
   const source = imageSourceUrl(image)
   return (
-    (image.assetToken && item.imageUrl.endsWith(`/api/playground/assets/${image.assetToken}`)) ||
-    (image.remoteUrl && item.imageUrl === image.remoteUrl) ||
-    Boolean(source && item.imageUrl === source)
+    (image.assetToken && item.originalUrl.endsWith(`/api/playground/assets/${image.assetToken}`)) ||
+    (image.remoteUrl && item.originalUrl === image.remoteUrl) ||
+    Boolean(source && item.originalUrl === source)
   )
 }
 
@@ -658,6 +704,7 @@ async function handleShareImage(image: GeneratedImage, index = 0): Promise<void>
       result.item,
       ...galleryItems.value.filter((item) => item.id !== result.item.id)
     ]
+    galleryNextOffset.value = galleryItems.value.length
     setSuccess(result.alreadyExists ? '这张图片已经在公共画廊中。' : '已转发到公共画廊。')
   } catch (error) {
     setError(error instanceof Error ? error.message : '转发到公共画廊失败')
@@ -1445,11 +1492,16 @@ onMounted(async () => {
   initializeThemeMode()
   applyBranding()
   await refreshGallery()
+  setupGalleryObserver()
   if (isAuthenticated.value) {
     await refreshWorkspace()
     await ensureConversationLoaded()
     resumePendingImageTasks()
   }
+})
+
+onBeforeUnmount(() => {
+  galleryObserver?.disconnect()
 })
 </script>
 
@@ -1527,9 +1579,13 @@ onMounted(async () => {
             type="button"
             @click="openGalleryModal(item)"
           >
-            <img :src="item.imageUrl" :alt="item.prompt" loading="lazy" />
+            <img :src="item.thumbnailUrl || item.imageUrl" :alt="item.prompt" loading="lazy" decoding="async" />
           </button>
         </template>
+      </div>
+      <div ref="gallerySentinel" class="gallery-sentinel" aria-hidden="true">
+        <span v-if="galleryLoadingMore">正在加载更多...</span>
+        <span v-else-if="!galleryHasMore && galleryItems.length > 0">已经到底了</span>
       </div>
     </section>
 
@@ -1911,7 +1967,7 @@ onMounted(async () => {
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-wrap">
           <img
-            :src="selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.imageUrl"
+            :src="selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.originalUrl"
             :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
           />
           <div class="modal-actions">
@@ -1920,7 +1976,7 @@ onMounted(async () => {
               type="button"
               aria-label="下载图片"
               @click="downloadImage(
-                selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.imageUrl || '',
+                selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
                 selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
               )"
             >

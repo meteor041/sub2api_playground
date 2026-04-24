@@ -11,7 +11,9 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 const port = Number.parseInt(process.env.PORT || '8081', 10)
-const upstream = (process.env.SUB2API_UPSTREAM || 'http://127.0.0.1:8080').replace(/\/$/, '')
+const upstream = (process.env.METEORAPI_UPSTREAM || process.env.SUB2API_UPSTREAM || 'https://meteor041.com').replace(/\/$/, '')
+const publicOrigin = (process.env.PLAYGROUND_PUBLIC_ORIGIN || '').replace(/\/$/, '')
+const thumbnailWidth = Number.parseInt(process.env.PLAYGROUND_THUMBNAIL_WIDTH || '480', 10)
 const staticRoot = path.join(__dirname, 'dist')
 const dataRoot = path.resolve(process.env.PLAYGROUND_DATA_DIR || path.join(__dirname, 'data', 'playground'))
 const conversationsRoot = path.join(dataRoot, 'conversations')
@@ -379,6 +381,27 @@ async function getAssetByToken(token) {
 
 function assetPublicUrl(token) {
   return `/api/playground/assets/${token}`
+}
+
+function absolutePublicUrl(req, value) {
+  if (/^https?:\/\//i.test(value)) {
+    return value
+  }
+  const host = req.headers?.['x-forwarded-host'] || req.headers?.host
+  if (!publicOrigin && !host) {
+    return value
+  }
+  const origin = publicOrigin || `${req.headers?.['x-forwarded-proto'] || 'http'}://${host}`
+  return `${origin}${value.startsWith('/') ? value : `/${value}`}`
+}
+
+function cloudflareImageUrl(req, value, width = thumbnailWidth) {
+  const safeWidth = Number.isFinite(width) && width > 0 ? width : 480
+  const originalUrl = absolutePublicUrl(req, value)
+  if (!/^https?:\/\//i.test(originalUrl)) {
+    return value
+  }
+  return `/cdn-cgi/image/width=${safeWidth},quality=70,format=auto,fit=scale-down/${originalUrl}`
 }
 
 async function persistAsset(userId, kind, namedAsset) {
@@ -1066,12 +1089,16 @@ async function saveConversationState(userId, conversationId, state) {
   }
 }
 
-function mapGalleryRow(row) {
+function mapGalleryRow(row, req) {
+  const originalUrl = row.asset_token ? assetPublicUrl(row.asset_token) : row.remote_url
+  const thumbnailUrl = row.asset_token ? cloudflareImageUrl(req, originalUrl) : originalUrl
   return {
     id: row.id,
     prompt: row.prompt,
     size: row.size,
-    imageUrl: row.asset_token ? assetPublicUrl(row.asset_token) : row.remote_url,
+    imageUrl: thumbnailUrl,
+    thumbnailUrl,
+    originalUrl,
     sourceConversationId: row.source_conversation_id,
     sourceImageId: row.source_image_id,
     sharedByUserId: Number(row.shared_by_user_id),
@@ -1080,16 +1107,25 @@ function mapGalleryRow(row) {
   }
 }
 
-async function listGalleryItems() {
+async function listGalleryItems(req, limit, offset) {
   const pool = requireDb()
+  const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || '24'), 10) || 24, 1), 48)
+  const safeOffset = Math.max(Number.parseInt(String(offset || '0'), 10) || 0, 0)
   const result = await pool.query(
     `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
             shared_by_user_id, shared_by_name, created_at
      FROM playground_gallery_items
      ORDER BY created_at DESC
-     LIMIT 100`
+     LIMIT $1 OFFSET $2`,
+    [safeLimit + 1, safeOffset]
   )
-  return result.rows.map(mapGalleryRow)
+  const hasMore = result.rows.length > safeLimit
+  const items = result.rows.slice(0, safeLimit).map((row) => mapGalleryRow(row, req))
+  return {
+    items,
+    nextOffset: hasMore ? safeOffset + items.length : null,
+    hasMore
+  }
 }
 
 async function shareGalleryImage(user, body) {
@@ -1135,7 +1171,7 @@ async function shareGalleryImage(user, body) {
   )
   if (existing.rows[0]) {
     return {
-      item: mapGalleryRow(existing.rows[0]),
+      item: mapGalleryRow(existing.rows[0], { headers: {} }),
       alreadyExists: true
     }
   }
@@ -1164,7 +1200,7 @@ async function shareGalleryImage(user, body) {
   )
   const row = result.rows[0]
   return {
-    item: mapGalleryRow(row),
+    item: mapGalleryRow(row, { headers: {} }),
     alreadyExists: false
   }
 }
@@ -1255,8 +1291,15 @@ const server = createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/playground/gallery') {
-      const items = await listGalleryItems()
-      json(res, 200, { code: 0, message: 'success', data: items })
+      const page = await listGalleryItems(req, url.searchParams.get('limit'), url.searchParams.get('offset'))
+      const body = JSON.stringify({ code: 0, message: 'success', data: page })
+      res.writeHead(200, {
+        'Cache-Control': 'public, max-age=30, s-maxage=300, stale-while-revalidate=600',
+        'CDN-Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
+        'Content-Length': Buffer.byteLength(body),
+        'Content-Type': 'application/json; charset=utf-8'
+      })
+      res.end(body)
       return
     }
 
@@ -1306,6 +1349,7 @@ const server = createServer(async (req, res) => {
       const filePath = path.join(assetsRoot, asset.file_path)
       res.writeHead(200, {
         'Cache-Control': 'public, max-age=31536000, immutable',
+        'CDN-Cache-Control': 'public, max-age=31536000, immutable',
         'Content-Type': asset.mime_type
       })
       createReadStream(filePath).pipe(res)
