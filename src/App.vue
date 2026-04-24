@@ -259,6 +259,15 @@ function openGalleryModal(item: GalleryItem): void {
   selectedImageKey.value = ''
 }
 
+function handleGalleryImageError(event: Event, item: GalleryItem): void {
+  const image = event.currentTarget as HTMLImageElement | null
+  if (!image || !item.originalUrl || image.dataset.fallbackApplied === 'true') {
+    return
+  }
+  image.dataset.fallbackApplied = 'true'
+  image.src = item.originalUrl
+}
+
 function triggerDownload(url: string, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
@@ -1579,7 +1588,13 @@ onBeforeUnmount(() => {
             type="button"
             @click="openGalleryModal(item)"
           >
-            <img :src="item.thumbnailUrl || item.imageUrl" :alt="item.prompt" loading="lazy" decoding="async" />
+            <img
+              :src="item.thumbnailUrl || item.imageUrl"
+              :alt="item.prompt"
+              loading="lazy"
+              decoding="async"
+              @error="handleGalleryImageError($event, item)"
+            />
           </button>
         </template>
       </div>
