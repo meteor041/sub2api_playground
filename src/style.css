@@ -491,7 +491,7 @@ h2 {
 .images-fab {
   position: fixed;
   right: 24px;
-  bottom: 92px;
+  bottom: 28px;
   z-index: 11;
   display: inline-flex;
   gap: 8px;
@@ -683,7 +683,7 @@ h2 {
 
 .composer-input-wrap textarea {
   min-height: 160px;
-  padding-right: 116px;
+  padding-right: 74px;
   padding-bottom: 46px;
 }
 
@@ -692,6 +692,7 @@ h2 {
   right: 16px;
   top: 50%;
   display: flex;
+  flex-direction: column;
   gap: 10px;
   align-items: center;
   transform: translateY(-50%);
@@ -1033,15 +1034,15 @@ h2 {
   }
 
   .composer-input-wrap textarea {
-    padding-right: 0.95rem;
+    padding-right: 76px;
     padding-bottom: 92px;
   }
 
   .composer-inline-actions {
-    top: auto;
     right: 14px;
-    bottom: 14px;
-    transform: none;
+    top: 50%;
+    bottom: auto;
+    transform: translateY(-50%);
   }
 
   .composer-hint {
@@ -1060,7 +1061,7 @@ h2 {
 
   .images-fab {
     right: 18px;
-    bottom: 92px;
+    bottom: 18px;
   }
 
   .direct-grid,
