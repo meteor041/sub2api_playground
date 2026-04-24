@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename)
 const port = Number.parseInt(process.env.PORT || '8081', 10)
 const upstream = (process.env.METEORAPI_UPSTREAM || process.env.SUB2API_UPSTREAM || 'https://meteor041.com').replace(/\/$/, '')
 const publicOrigin = (process.env.PLAYGROUND_PUBLIC_ORIGIN || '').replace(/\/$/, '')
+const cloudflareImageResizingEnabled = process.env.PLAYGROUND_ENABLE_CF_IMAGE_RESIZING === 'true'
 const thumbnailWidth = Number.parseInt(process.env.PLAYGROUND_THUMBNAIL_WIDTH || '480', 10)
 const staticRoot = path.join(__dirname, 'dist')
 const dataRoot = path.resolve(process.env.PLAYGROUND_DATA_DIR || path.join(__dirname, 'data', 'playground'))
@@ -396,6 +397,9 @@ function absolutePublicUrl(req, value) {
 }
 
 function cloudflareImageUrl(req, value, width = thumbnailWidth) {
+  if (!cloudflareImageResizingEnabled) {
+    return value
+  }
   const safeWidth = Number.isFinite(width) && width > 0 ? width : 480
   const originalUrl = absolutePublicUrl(req, value)
   if (!/^https?:\/\//i.test(originalUrl)) {

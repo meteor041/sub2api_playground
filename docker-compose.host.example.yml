@@ -11,6 +11,8 @@ services:
     environment:
       # Use this when sub2api itself is also running with Docker host networking.
       - SUB2API_UPSTREAM=${SUB2API_UPSTREAM:-http://127.0.0.1:8080}
+      - PLAYGROUND_ENABLE_CF_IMAGE_RESIZING=${PLAYGROUND_ENABLE_CF_IMAGE_RESIZING:-false}
+      - PLAYGROUND_PUBLIC_ORIGIN=${PLAYGROUND_PUBLIC_ORIGIN:-}
       - DATABASE_URL=${DATABASE_URL:-postgres://postgres:postgres@127.0.0.1:5432/sub2api_playground?sslmode=disable}
       - PLAYGROUND_DATA_DIR=/data/playground
     volumes:
