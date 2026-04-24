@@ -262,6 +262,22 @@ function galleryFallbackUrl(item: GalleryItem): string {
   return item.originalUrl || item.thumbnailUrl || item.imageUrl || ''
 }
 
+function imageAspectRatio(size?: string): string | undefined {
+  if (!size) {
+    return undefined
+  }
+  const match = size.trim().match(/^(\d+)\s*x\s*(\d+)$/i)
+  if (!match) {
+    return undefined
+  }
+  const width = Number.parseInt(match[1], 10)
+  const height = Number.parseInt(match[2], 10)
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return undefined
+  }
+  return `${width} / ${height}`
+}
+
 function buildDisplayImageSource(primary?: string, fallback?: string): DisplayImageSource | null {
   const src = primary || fallback || ''
   if (!src) {
@@ -1628,6 +1644,7 @@ onBeforeUnmount(() => {
             :key="item.id"
             class="masonry-tile"
             type="button"
+            :style="{ aspectRatio: imageAspectRatio(item.size) || '1 / 1' }"
             @click="openGalleryModal(item)"
           >
             <img
