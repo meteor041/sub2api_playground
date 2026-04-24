@@ -191,6 +191,13 @@ Set these environment variables on the Node server container:
 
 When `R2_*` is complete, the service uploads asset bytes to R2 during `persistAsset()`. The old `/api/playground/assets/:token` route still works: it serves the local copy when present and otherwise redirects to the CDN URL.
 
+For historical local assets, run the one-time migration script:
+
+```bash
+npm run migrate:r2 -- --dry-run
+npm run migrate:r2 -- --concurrency=8
+```
+
 ## Domain Proxy
 
 For `playground.example.com`, point the domain to `http://127.0.0.1:8081` through your reverse proxy or Cloudflare Tunnel.

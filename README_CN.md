@@ -193,6 +193,13 @@ docker compose -f docker-compose.example.yml up -d --build
 
 当 `R2_*` 配置完整后，服务会在 `persistAsset()` 时把图片字节上传到 R2。旧的 `/api/playground/assets/:token` 路由仍然保留：本地文件存在时继续直接返回，不存在时会跳转到 CDN URL。
 
+对于历史上已经落在本地磁盘里的图片，可以运行一次性迁移脚本：
+
+```bash
+npm run migrate:r2 -- --dry-run
+npm run migrate:r2 -- --concurrency=8
+```
+
 ## 域名代理
 
 如果你要使用 `playground.example.com`，可以在反向代理或 Cloudflare Tunnel 中把它指向 `http://127.0.0.1:8081`。
