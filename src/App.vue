@@ -101,6 +101,7 @@ const loginBusy = ref(false)
 const loadingApp = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+const galleryBatchSize = 8
 const galleryItems = ref<GalleryItem[]>([])
 const galleryBusy = ref(false)
 const galleryLoadingMore = ref(false)
@@ -610,7 +611,7 @@ async function refreshGallery(): Promise<void> {
   galleryNextOffset.value = 0
   galleryHasMore.value = true
   try {
-    const page = await listGalleryItems(0)
+    const page = await listGalleryItems(0, galleryBatchSize)
     galleryItems.value = page.items
     galleryNextOffset.value = page.nextOffset || galleryItems.value.length
     galleryHasMore.value = page.hasMore
@@ -627,7 +628,7 @@ async function loadMoreGallery(): Promise<void> {
   }
   galleryLoadingMore.value = true
   try {
-    const page = await listGalleryItems(galleryNextOffset.value)
+    const page = await listGalleryItems(galleryNextOffset.value, galleryBatchSize)
     const existingIds = new Set(galleryItems.value.map((item) => item.id))
     galleryItems.value = [
       ...galleryItems.value,
@@ -652,7 +653,7 @@ function setupGalleryObserver(): void {
       void loadMoreGallery()
     }
   }, {
-    rootMargin: '640px 0px'
+    rootMargin: '180px 0px'
   })
   galleryObserver.observe(gallerySentinel.value)
 }

@@ -348,7 +348,7 @@ export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
   return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
 }
 
-export function listGalleryItems(offset = 0, limit = 24): Promise<GalleryPage> {
+export function listGalleryItems(offset = 0, limit = 8): Promise<GalleryPage> {
   return request<GalleryPage>(`/api/playground/gallery?offset=${offset}&limit=${limit}`, {}, false)
 }
 
