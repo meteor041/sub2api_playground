@@ -32,6 +32,7 @@ import type {
 } from './types'
 
 const textModels = [
+  'gpt-5.5',
   'gpt-5.4',
   'gpt-5.4-mini',
   'gpt-5.3-codex',
@@ -88,6 +89,7 @@ const imageToolInstructions = [
 
 const isAuthenticated = ref(hasAuthToken())
 const activeView = ref<'gallery' | 'create'>('gallery')
+const createMode = ref<'chat' | 'direct'>('chat')
 const email = ref('')
 const password = ref('')
 const loginBusy = ref(false)
@@ -96,7 +98,6 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const galleryItems = ref<GalleryItem[]>([])
 const galleryBusy = ref(false)
-const galleryScroller = ref<HTMLElement | null>(null)
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -122,6 +123,7 @@ const imageBusy = ref(false)
 const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
 const selectedImageKey = ref('')
+const selectedGalleryItem = ref<GalleryItem | null>(null)
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
 
@@ -218,10 +220,17 @@ function imageSourceUrl(image: GeneratedImage): string {
 
 function closeImageModal(): void {
   selectedImageKey.value = ''
+  selectedGalleryItem.value = null
 }
 
 function openImageModal(image: GeneratedImage, index: number): void {
   selectedImageKey.value = imageShareKey(image, index)
+  selectedGalleryItem.value = null
+}
+
+function openGalleryModal(item: GalleryItem): void {
+  selectedGalleryItem.value = item
+  selectedImageKey.value = ''
 }
 
 function triggerDownload(url: string, filename: string): void {
@@ -491,17 +500,6 @@ async function refreshGallery(): Promise<void> {
   } finally {
     galleryBusy.value = false
   }
-}
-
-function scrollGallery(direction: 'left' | 'right'): void {
-  const scroller = galleryScroller.value
-  if (!scroller) {
-    return
-  }
-  scroller.scrollBy({
-    left: direction === 'left' ? -scroller.clientWidth * 0.82 : scroller.clientWidth * 0.82,
-    behavior: 'smooth'
-  })
 }
 
 function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
@@ -1039,6 +1037,7 @@ async function handleSendChat(): Promise<void> {
     }
 
     generatedImages.value = normalizeGeneratedImages([...images, ...generatedImages.value])
+    createMode.value = 'chat'
 
     let finalMessage = `已根据提示词生成图片：${toolArgs.prompt}`
     try {
@@ -1155,6 +1154,7 @@ async function handleGenerateImage(): Promise<void> {
       throw new Error('图片生成成功，但响应中没有可展示的图片。')
     }
     generatedImages.value = normalizeGeneratedImages([...images, ...generatedImages.value])
+    createMode.value = 'direct'
     chatMessages.value.push({
       id: uid('assistant-image'),
       role: 'assistant',
@@ -1242,27 +1242,24 @@ onMounted(async () => {
         </button>
       </header>
 
-      <div class="gallery-stage">
-        <button class="gallery-arrow left" type="button" aria-label="向左浏览" @click="scrollGallery('left')">‹</button>
-        <div ref="galleryScroller" class="gallery-strip">
-          <article v-if="galleryBusy" class="glass-card gallery-empty">
-            正在读取公共画廊...
-          </article>
-          <article v-else-if="galleryItems.length === 0" class="glass-card gallery-empty">
-            还没有公开分享的图片。登录后在创造页点击“转发”来发布第一张作品。
-          </article>
-          <article v-for="item in galleryItems" :key="item.id" class="glass-card public-card">
-            <img :src="item.imageUrl" :alt="item.prompt" />
-            <div class="public-card-body">
-              <p>{{ item.prompt }}</p>
-              <div>
-                <span>{{ item.size }}</span>
-                <span>{{ item.sharedByName || '匿名用户' }}</span>
-              </div>
-            </div>
-          </article>
-        </div>
-        <button class="gallery-arrow right" type="button" aria-label="向右浏览" @click="scrollGallery('right')">›</button>
+      <div class="gallery-masonry">
+        <article v-if="galleryBusy" class="gallery-empty">
+          正在读取公共画廊...
+        </article>
+        <article v-else-if="galleryItems.length === 0" class="gallery-empty">
+          还没有公开分享的图片。登录后在创造页点击“转发”来发布第一张作品。
+        </article>
+        <template v-else>
+          <button
+            v-for="item in galleryItems"
+            :key="item.id"
+            class="masonry-tile"
+            type="button"
+            @click="openGalleryModal(item)"
+          >
+            <img :src="item.imageUrl" :alt="item.prompt" loading="lazy" />
+          </button>
+        </template>
       </div>
     </section>
 
@@ -1319,11 +1316,11 @@ onMounted(async () => {
           </div>
         </aside>
 
-        <section class="chat panel">
+        <section class="chat panel generator-card">
           <div class="panel-header">
             <div>
               <p class="eyebrow">Create</p>
-              <h2>对话空间</h2>
+              <h2>创造空间</h2>
             </div>
             <div class="top-controls">
               <select v-model="selectedTextModel">
@@ -1343,7 +1340,29 @@ onMounted(async () => {
             </div>
           </div>
 
-          <div class="messages">
+          <div class="mode-tabs" role="tablist" aria-label="创造模式">
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="createMode === 'chat'"
+              :class="{ active: createMode === 'chat' }"
+              @click="createMode = 'chat'"
+            >
+              对话生图
+            </button>
+            <button
+              type="button"
+              role="tab"
+              :aria-selected="createMode === 'direct'"
+              :class="{ active: createMode === 'direct' }"
+              @click="createMode = 'direct'"
+            >
+              直接生图
+            </button>
+          </div>
+
+          <template v-if="createMode === 'chat'">
+            <div class="messages">
             <article v-if="conversationBusy" class="empty">
               正在加载会话...
             </article>
@@ -1379,9 +1398,9 @@ onMounted(async () => {
                 </div>
               </div>
             </article>
-          </div>
+            </div>
 
-          <form class="composer" @submit.prevent="handleSendChat">
+            <form class="composer" @submit.prevent="handleSendChat">
             <input
               ref="composerFileInput"
               class="composer-file-input"
@@ -1418,6 +1437,62 @@ onMounted(async () => {
             <button :disabled="chatBusy || !selectedKeySecret" type="submit">
               {{ chatBusy ? '发送中...' : '发送' }}
             </button>
+            </form>
+          </template>
+
+          <form v-else class="image-form direct-form" @submit.prevent="handleGenerateImage">
+            <input
+              ref="imageSourceInput"
+              class="composer-file-input"
+              type="file"
+              accept="image/*"
+              @change="handleManualImageChange"
+            />
+            <div class="direct-grid">
+              <label>
+                图片尺寸
+                <select v-model="imageSize">
+                  <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
+                </select>
+              </label>
+              <div class="direct-upload">
+                <span>原图</span>
+                <div class="composer-tools">
+                  <button class="secondary" type="button" :disabled="imageBusy" @click="openManualImagePicker">
+                    {{ imageSource ? '更换原图' : '上传原图' }}
+                  </button>
+                  <button
+                    v-if="imageSource"
+                    class="ghost"
+                    type="button"
+                    :disabled="imageBusy"
+                    @click="clearManualImageSource"
+                  >
+                    清除
+                  </button>
+                </div>
+              </div>
+            </div>
+            <article v-if="imageSource" class="composer-preview direct-preview">
+              <img :src="imageSource.dataUrl" :alt="imageSource.name" />
+              <div class="composer-preview-meta">
+                <span>{{ imageSource.name }}</span>
+                <span>编辑模式</span>
+              </div>
+            </article>
+            <label class="direct-prompt">
+              {{ imageSource ? '编辑指令' : '提示词' }}
+              <textarea
+                v-model="imagePrompt"
+                rows="9"
+                :placeholder="imageSource
+                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道'
+                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒'"
+              />
+            </label>
+            <button :disabled="imageBusy || !selectedKeySecret" type="submit">
+              {{ imageBusy ? imageTaskLabel || '处理中...' : (imageSource ? '编辑图片' : '生成图片') }}
+            </button>
           </form>
         </section>
 
@@ -1429,56 +1504,6 @@ onMounted(async () => {
             </div>
             <span class="pill">{{ imageModel }}</span>
           </div>
-
-          <form class="image-form" @submit.prevent="handleGenerateImage">
-            <input
-              ref="imageSourceInput"
-              class="composer-file-input"
-              type="file"
-              accept="image/*"
-              @change="handleManualImageChange"
-            />
-            <label>
-              图片尺寸
-              <select v-model="imageSize">
-                <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
-              </select>
-            </label>
-            <div class="composer-tools">
-              <button class="secondary" type="button" :disabled="imageBusy" @click="openManualImagePicker">
-                {{ imageSource ? '更换原图' : '上传原图' }}
-              </button>
-              <button
-                v-if="imageSource"
-                class="ghost"
-                type="button"
-                :disabled="imageBusy"
-                @click="clearManualImageSource"
-              >
-                清除
-              </button>
-            </div>
-            <article v-if="imageSource" class="composer-preview">
-              <img :src="imageSource.dataUrl" :alt="imageSource.name" />
-              <div class="composer-preview-meta">
-                <span>{{ imageSource.name }}</span>
-                <span>编辑模式</span>
-              </div>
-            </article>
-            <label>
-              {{ imageSource ? '编辑指令' : '提示词' }}
-              <textarea
-                v-model="imagePrompt"
-                rows="5"
-                :placeholder="imageSource
-                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道'
-                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒'"
-              />
-            </label>
-            <button :disabled="imageBusy || !selectedKeySecret" type="submit">
-              {{ imageBusy ? imageTaskLabel || '处理中...' : (imageSource ? '编辑图片' : '生成图片') }}
-            </button>
-          </form>
 
           <div class="local-gallery">
             <article
@@ -1529,7 +1554,7 @@ onMounted(async () => {
     </section>
 
     <div
-      v-if="selectedImage"
+      v-if="selectedImage || selectedGalleryItem"
       class="image-modal"
       role="dialog"
       aria-modal="true"
@@ -1539,8 +1564,11 @@ onMounted(async () => {
       <article class="image-modal-card">
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-wrap">
-          <img :src="imageSourceUrl(selectedImage)" :alt="selectedImage.prompt" />
-          <div class="modal-actions">
+          <img
+            :src="selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.imageUrl"
+            :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
+          />
+          <div v-if="selectedImage" class="modal-actions">
             <button
               class="icon-button"
               type="button"
@@ -1570,9 +1598,13 @@ onMounted(async () => {
         </div>
         <div class="modal-copy">
           <p class="eyebrow">Prompt</p>
-          <h2>{{ selectedImage.size }}</h2>
-          <p>{{ selectedImage.prompt }}</p>
-          <small>{{ new Date(selectedImage.createdAt).toLocaleString() }}</small>
+          <h2>{{ selectedImage?.size || selectedGalleryItem?.size }}</h2>
+          <p>{{ selectedImage?.prompt || selectedGalleryItem?.prompt }}</p>
+          <small>
+            {{ selectedImage
+              ? new Date(selectedImage.createdAt).toLocaleString()
+              : `${selectedGalleryItem?.sharedByName || '匿名用户'} · ${new Date(selectedGalleryItem?.createdAt || '').toLocaleString()}` }}
+          </small>
         </div>
       </article>
     </div>
