@@ -1016,6 +1016,17 @@ async function handleComposerPaste(event: ClipboardEvent): Promise<void> {
   await appendComposerImages(imageFiles)
 }
 
+function handleComposerKeydown(event: KeyboardEvent): void {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+    return
+  }
+  event.preventDefault()
+  if (chatBusy.value) {
+    return
+  }
+  void handleSendChat()
+}
+
 async function handleSendChat(): Promise<void> {
   if (!currentConversationId.value) {
     await startNewConversation()
@@ -1682,6 +1693,7 @@ onMounted(async () => {
                   v-model="chatInput"
                   rows="4"
                   placeholder="输入文字对话内容；明确要求画图时，模型会自动调用生图工具。"
+                  @keydown="handleComposerKeydown"
                   @paste="handleComposerPaste"
                 />
                 <div class="composer-inline-actions">
@@ -1709,7 +1721,6 @@ onMounted(async () => {
                     </svg>
                   </button>
                 </div>
-                <span class="composer-hint">支持复制截图后直接粘贴。</span>
               </div>
             </div>
             </form>

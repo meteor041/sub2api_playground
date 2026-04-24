@@ -695,7 +695,6 @@ h2 {
 .composer-input-wrap textarea {
   min-height: 160px;
   padding-right: 74px;
-  padding-bottom: 46px;
 }
 
 .composer-inline-actions {
@@ -743,14 +742,6 @@ h2 {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-}
-
-.composer-hint {
-  position: absolute;
-  right: 18px;
-  bottom: 16px;
-  color: var(--muted);
-  font-size: 0.86rem;
 }
 
 .pill {
@@ -1080,7 +1071,6 @@ h2 {
 
   .composer-input-wrap textarea {
     padding-right: 76px;
-    padding-bottom: 92px;
   }
 
   .composer-inline-actions {
@@ -1088,13 +1078,6 @@ h2 {
     top: 50%;
     bottom: auto;
     transform: translateY(-50%);
-  }
-
-  .composer-hint {
-    right: auto;
-    left: 16px;
-    bottom: 28px;
-    max-width: calc(100% - 138px);
   }
 
   .image-drawer {
