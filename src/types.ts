@@ -112,6 +112,10 @@ export interface ImageTaskResult {
 export interface ImageTaskStatus {
   task_id: string
   status: 'queued' | 'processing' | 'completed' | 'failed'
+  conversation_id: string | null
+  mode: 'generate' | 'edit'
+  prompt: string
+  size: string
   created_at: string
   updated_at: string
   error: string | null

@@ -477,6 +477,10 @@ function buildTaskResponse(task) {
   return {
     task_id: task.id,
     status: task.status,
+    conversation_id: task.payload.conversation_id,
+    mode: task.payload.mode,
+    prompt: task.payload.prompt,
+    size: task.payload.size,
     created_at: task.createdAt,
     updated_at: task.updatedAt,
     error: task.error || null,
