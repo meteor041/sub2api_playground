@@ -739,12 +739,6 @@ h2 {
   display: none;
 }
 
-.composer-previews {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-}
-
 .composer-preview {
   display: grid;
   gap: 10px;
@@ -774,6 +768,75 @@ h2 {
   font-size: 0.82rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.composer-attachments {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  overflow-x: auto;
+  padding: 2px 2px 4px;
+  scrollbar-width: thin;
+}
+
+.composer-attachment {
+  position: relative;
+  flex: 0 0 108px;
+  border: 1px solid rgba(255, 79, 46, 0.18);
+  border-radius: 22px;
+  overflow: hidden;
+  background: var(--ghost-bg);
+  box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12);
+}
+
+.composer-attachment-button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: zoom-in;
+}
+
+.composer-attachment-button img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  display: block;
+}
+
+.composer-attachment-meta {
+  padding: 8px 10px 10px;
+}
+
+.composer-attachment-meta span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.composer-attachment-remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: none;
+}
+
+.composer-attachment-remove:hover {
+  background: rgba(255, 79, 46, 0.86);
 }
 
 .composer-input-wrap {
@@ -953,6 +1016,10 @@ h2 {
   padding: 18px;
   background: var(--modal-card-bg);
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.28);
+}
+
+.composer-image-modal-card {
+  width: min(860px, 100%);
 }
 
 .modal-close {

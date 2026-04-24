@@ -146,6 +146,7 @@ const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
 const selectedImageKey = ref('')
 const selectedGalleryItem = ref<GalleryItem | null>(null)
+const selectedComposerImage = ref<ChatImageAttachment | null>(null)
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
 
@@ -427,16 +428,25 @@ function handleGeneratedImageError(event: Event, image: GeneratedImage): void {
 function closeImageModal(): void {
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
+  selectedComposerImage.value = null
 }
 
 function openImageModal(image: GeneratedImage, index: number): void {
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
+  selectedComposerImage.value = null
 }
 
 function openGalleryModal(item: GalleryItem): void {
   selectedGalleryItem.value = item
   selectedImageKey.value = ''
+  selectedComposerImage.value = null
+}
+
+function openComposerImageModal(image: ChatImageAttachment): void {
+  selectedComposerImage.value = image
+  selectedImageKey.value = ''
+  selectedGalleryItem.value = null
 }
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
@@ -1996,15 +2006,27 @@ onBeforeUnmount(() => {
               @change="handleComposerFileChange"
             />
             <div class="composer-main">
-              <div v-if="composerImages.length > 0" class="composer-previews">
-                <article v-for="image in composerImages" :key="image.id" class="composer-preview">
-                  <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
-                  <div class="composer-preview-meta">
+              <div v-if="composerImages.length > 0" class="composer-attachments" aria-label="待发送图片">
+                <article v-for="image in composerImages" :key="image.id" class="composer-attachment">
+                  <button
+                    class="composer-attachment-button"
+                    type="button"
+                    :aria-label="`查看图片 ${image.name}`"
+                    @click="openComposerImageModal(image)"
+                  >
+                    <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
+                  </button>
+                  <div class="composer-attachment-meta">
                     <span>{{ image.name }}</span>
-                    <button class="ghost mini" type="button" @click="removeComposerImage(image.id)">
-                      移除
-                    </button>
                   </div>
+                  <button
+                    class="composer-attachment-remove"
+                    type="button"
+                    aria-label="移除图片"
+                    @click.stop="removeComposerImage(image.id)"
+                  >
+                    ×
+                  </button>
                 </article>
               </div>
               <div class="composer-input-wrap">
@@ -2256,6 +2278,46 @@ onBeforeUnmount(() => {
               ? new Date(selectedImage.createdAt).toLocaleString()
               : `${selectedGalleryItem?.sharedByName || '匿名用户'} · ${new Date(selectedGalleryItem?.createdAt || '').toLocaleString()}` }}
           </small>
+        </div>
+      </article>
+    </div>
+
+    <div
+      v-if="selectedComposerImage"
+      class="image-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="上传图片详情"
+      @click.self="closeImageModal"
+    >
+      <article class="image-modal-card composer-image-modal-card">
+        <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
+        <div class="modal-image-wrap">
+          <img
+            :src="selectedComposerImage.dataUrl"
+            :alt="selectedComposerImage.name"
+            loading="lazy"
+          />
+          <div class="modal-actions">
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="下载图片"
+              @click="downloadImage(selectedComposerImage.dataUrl, selectedComposerImage.name || 'uploaded-image')"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-copy">
+          <p class="eyebrow">Upload</p>
+          <h2>{{ selectedComposerImage.name }}</h2>
+          <div class="modal-prompt-scroll">
+            <p>这张图片会作为当前对话的输入附件随消息一起发送。</p>
+          </div>
+          <small>{{ selectedComposerImage.mimeType }}</small>
         </div>
       </article>
     </div>
