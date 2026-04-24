@@ -56,6 +56,7 @@ export interface ChatImageAttachment {
   mimeType: string
   dataUrl: string
   assetToken?: string
+  image_url?: string
 }
 
 export interface ChatMessage {
@@ -66,6 +67,7 @@ export interface ChatMessage {
   attachments?: ChatImageAttachment[]
   imageDataUrl?: string
   imageAssetToken?: string
+  image_url?: string
 }
 
 export interface GeneratedImage {
@@ -77,12 +79,14 @@ export interface GeneratedImage {
   remoteUrl?: string
   createdAt: number
   assetToken?: string
+  image_url?: string
 }
 
 export interface GalleryItem {
   id: string
   prompt: string
   size: string
+  image_url?: string
   imageUrl: string
   thumbnailUrl: string
   originalUrl: string
@@ -110,6 +114,7 @@ export interface ImageTaskResultItem {
   size: string
   data_url: string | null
   remote_url: string | null
+  image_url: string | null
 }
 
 export interface ImageTaskResult {

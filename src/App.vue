@@ -206,6 +206,11 @@ interface PendingImageTask {
   assistantMessageId?: string
 }
 
+interface DisplayImageSource {
+  src: string
+  fallbackSrc: string
+}
+
 function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -225,13 +230,13 @@ function buildImageFilename(seed: string, index = 1): string {
 }
 
 function imageShareKey(image: GeneratedImage, index = 0): string {
-  return image.shareKey || image.assetToken || image.remoteUrl || `${image.id}:${image.createdAt}:${index}`
+  return image.shareKey || image.assetToken || image.image_url || image.remoteUrl || `${image.id}:${image.createdAt}:${index}`
 }
 
 function normalizeGeneratedImages(images: GeneratedImage[]): GeneratedImage[] {
   const seen = new Map<string, number>()
   return images.map((image, index) => {
-    const baseKey = image.shareKey || image.assetToken || image.remoteUrl || `${image.id}:${image.createdAt || index}`
+    const baseKey = image.shareKey || image.assetToken || image.image_url || image.remoteUrl || `${image.id}:${image.createdAt || index}`
     const count = seen.get(baseKey) || 0
     seen.set(baseKey, count + 1)
     return {
@@ -242,7 +247,43 @@ function normalizeGeneratedImages(images: GeneratedImage[]): GeneratedImage[] {
 }
 
 function imageSourceUrl(image: GeneratedImage): string {
-  return image.dataUrl || image.remoteUrl || ''
+  return image.image_url || image.dataUrl || image.remoteUrl || ''
+}
+
+function imageFallbackUrl(image: GeneratedImage): string {
+  return image.dataUrl || (image.assetToken ? `/api/playground/assets/${image.assetToken}` : '') || image.remoteUrl || ''
+}
+
+function galleryImageUrl(item: GalleryItem): string {
+  return item.image_url || item.thumbnailUrl || item.imageUrl || item.originalUrl || ''
+}
+
+function galleryFallbackUrl(item: GalleryItem): string {
+  return item.originalUrl || item.thumbnailUrl || item.imageUrl || ''
+}
+
+function buildDisplayImageSource(primary?: string, fallback?: string): DisplayImageSource | null {
+  const src = primary || fallback || ''
+  if (!src) {
+    return null
+  }
+  return {
+    src,
+    fallbackSrc: fallback || src
+  }
+}
+
+function handleImageError(event: Event, fallbackSrc: string): void {
+  const image = event.currentTarget as HTMLImageElement | null
+  if (!image || !fallbackSrc || image.dataset.fallbackApplied === 'true' || image.src === fallbackSrc) {
+    return
+  }
+  image.dataset.fallbackApplied = 'true'
+  image.src = fallbackSrc
+}
+
+function handleGeneratedImageError(event: Event, image: GeneratedImage): void {
+  handleImageError(event, imageFallbackUrl(image))
 }
 
 function closeImageModal(): void {
@@ -261,24 +302,7 @@ function openGalleryModal(item: GalleryItem): void {
 }
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
-  const image = event.currentTarget as HTMLImageElement | null
-  if (!image) {
-    return
-  }
-  if (image.dataset.thumbnailRetried !== 'true' && item.thumbnailUrl) {
-    image.dataset.thumbnailRetried = 'true'
-    window.setTimeout(() => {
-      image.src = `${item.thumbnailUrl}${item.thumbnailUrl.includes('?') ? '&' : '?'}retry=${Date.now()}`
-    }, 1500)
-    return
-  }
-  if (!item.originalUrl || image.dataset.fallbackApplied === 'true') {
-    return
-  }
-  image.dataset.fallbackApplied = 'true'
-  window.setTimeout(() => {
-    image.src = item.originalUrl
-  }, 1000)
+  handleImageError(event, galleryFallbackUrl(item))
 }
 
 function triggerDownload(url: string, filename: string): void {
@@ -862,7 +886,7 @@ function buildFunctionCallOutput(images: GeneratedImage[], prompt: string, size:
     prompt,
     size,
     image_count: images.length,
-    image_url: images[0]?.remoteUrl || null,
+    image_url: images[0]?.image_url || images[0]?.remoteUrl || null,
     preview_ready: true,
     note: 'The UI already has the generated image preview and will display it to the user.'
   })
@@ -1020,10 +1044,13 @@ async function handleManualImageChange(event: Event): Promise<void> {
   }
 }
 
-function messageImages(message: ChatMessage): string[] {
-  const images = message.attachments?.map((image) => image.dataUrl) || []
-  if (message.imageDataUrl) {
-    images.push(message.imageDataUrl)
+function messageImages(message: ChatMessage): DisplayImageSource[] {
+  const images = (message.attachments || [])
+    .map((image) => buildDisplayImageSource(image.image_url, image.dataUrl))
+    .filter((image): image is DisplayImageSource => Boolean(image))
+  const inlineImage = buildDisplayImageSource(message.image_url, message.imageDataUrl)
+  if (inlineImage) {
+    images.push(inlineImage)
   }
   return images
 }
@@ -1302,10 +1329,11 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
         size,
         dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined,
         remoteUrl: remoteUrl || undefined,
+        image_url: remoteUrl || undefined,
         createdAt: Date.now()
       } satisfies GeneratedImage
     })
-    .filter((item: GeneratedImage) => item.dataUrl || item.remoteUrl)
+    .filter((item: GeneratedImage) => item.dataUrl || item.image_url || item.remoteUrl)
 }
 
 function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[] {
@@ -1317,9 +1345,10 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
       size: item.size,
       dataUrl: item.data_url || undefined,
       remoteUrl: item.remote_url || undefined,
+      image_url: item.image_url || undefined,
       createdAt: Date.now()
     } satisfies GeneratedImage))
-    .filter((item) => item.dataUrl || item.remoteUrl)
+    .filter((item) => item.dataUrl || item.image_url || item.remoteUrl)
 }
 
 async function archivePendingImageFailure(pendingTask: PendingImageTask, message: string): Promise<void> {
@@ -1531,7 +1560,7 @@ onBeforeUnmount(() => {
   <main class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-logo" :src="logoUrl" alt="MeteorAPI logo" />
+        <img class="brand-logo" :src="logoUrl" alt="MeteorAPI logo" loading="lazy" />
         <div>
           <strong>Image Lab</strong>
           <span>MeteorAPI</span>
@@ -1602,7 +1631,7 @@ onBeforeUnmount(() => {
             @click="openGalleryModal(item)"
           >
             <img
-              :src="item.thumbnailUrl || item.imageUrl"
+              :src="galleryImageUrl(item)"
               :alt="item.prompt"
               loading="lazy"
               decoding="async"
@@ -1762,17 +1791,19 @@ onBeforeUnmount(() => {
               <div v-if="messageImages(message).length > 0" class="message-images">
                 <div
                   v-for="(image, index) in messageImages(message)"
-                  :key="image"
+                  :key="`${image.src}-${index}`"
                   class="message-image-card"
                 >
                   <img
-                    :src="image"
+                    :src="image.src"
                     :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
+                    loading="lazy"
+                    @error="handleImageError($event, image.fallbackSrc)"
                   />
                   <button
                     class="ghost mini"
                     type="button"
-                    @click="downloadImage(image, message.content || `${message.role}-image`, index + 1)"
+                    @click="downloadImage(image.src, message.content || `${message.role}-image`, index + 1)"
                   >
                     下载图片
                   </button>
@@ -1793,7 +1824,7 @@ onBeforeUnmount(() => {
             <div class="composer-main">
               <div v-if="composerImages.length > 0" class="composer-previews">
                 <article v-for="image in composerImages" :key="image.id" class="composer-preview">
-                  <img :src="image.dataUrl" :alt="image.name" />
+                  <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
                   <div class="composer-preview-meta">
                     <span>{{ image.name }}</span>
                     <button class="ghost mini" type="button" @click="removeComposerImage(image.id)">
@@ -1874,7 +1905,7 @@ onBeforeUnmount(() => {
               </div>
             </div>
             <article v-if="imageSource" class="composer-preview direct-preview">
-              <img :src="imageSource.dataUrl" :alt="imageSource.name" />
+              <img :src="imageSource.dataUrl" :alt="imageSource.name" loading="lazy" />
               <div class="composer-preview-meta">
                 <span>{{ imageSource.name }}</span>
                 <span>编辑模式</span>
@@ -1943,7 +1974,13 @@ onBeforeUnmount(() => {
               :class="{ active: selectedImageKey === imageShareKey(image, index) }"
               @click="openImageModal(image, index)"
             >
-              <img v-if="imageSourceUrl(image)" :src="imageSourceUrl(image)" :alt="image.prompt" />
+              <img
+                v-if="imageSourceUrl(image)"
+                :src="imageSourceUrl(image)"
+                :alt="image.prompt"
+                loading="lazy"
+                @error="handleGeneratedImageError($event, image)"
+              />
               <div class="thumb-overlay">
                 <span>{{ image.size }}</span>
                 <div class="image-actions" @click.stop>
@@ -1995,8 +2032,12 @@ onBeforeUnmount(() => {
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-wrap">
           <img
-            :src="selectedImage ? imageSourceUrl(selectedImage) : selectedGalleryItem?.originalUrl"
+            :src="selectedImage ? imageSourceUrl(selectedImage) : (selectedGalleryItem ? galleryImageUrl(selectedGalleryItem) : '')"
             :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
+            loading="lazy"
+            @error="selectedImage
+              ? handleGeneratedImageError($event, selectedImage)
+              : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined)"
           />
           <div class="modal-actions">
             <button
