@@ -288,6 +288,38 @@ function imageDownloadUrl(image: GeneratedImage): string {
   return imageFallbackUrl(image) || imageSourceUrl(image)
 }
 
+function isSameOriginUrl(value: string): boolean {
+  if (!value || value.startsWith('data:') || value.startsWith('blob:')) {
+    return true
+  }
+  try {
+    return new URL(value, window.location.href).origin === window.location.origin
+  } catch {
+    return false
+  }
+}
+
+function buildNativeDownloadHref(source: string, filename = ''): string {
+  if (!source || source.startsWith('data:') || source.startsWith('blob:')) {
+    return source
+  }
+
+  try {
+    const url = new URL(source, window.location.href)
+    if (url.origin === window.location.origin && url.pathname.startsWith('/api/playground/assets/')) {
+      url.searchParams.set('download', '1')
+      if (filename.trim()) {
+        url.searchParams.set('filename', filename)
+      }
+      return `${url.pathname}${url.search}${url.hash}`
+    }
+  } catch {
+    return source
+  }
+
+  return source
+}
+
 function buildCompressedPreviewUrl(source: string, width = galleryPreviewWidth): string {
   if (!source || source.startsWith('data:')) {
     return source
@@ -1181,29 +1213,35 @@ function messageImages(message: ChatMessage): DisplayImageSource[] {
 }
 
 async function downloadImage(source: string, filenameSeed: string, index = 1): Promise<void> {
+  if (!source) {
+    return
+  }
+
+  const filename = buildImageFilename(filenameSeed, index, inferImageExtension(source))
+  const href = buildNativeDownloadHref(source, filename)
+  const link = document.createElement('a')
+  const shouldOpenInNewTab = !isSameOriginUrl(href)
+
+  link.href = href
+  link.download = filename
+  link.rel = 'noopener noreferrer'
+  link.style.display = 'none'
+  if (shouldOpenInNewTab) {
+    link.target = '_blank'
+  }
+
+  document.body.appendChild(link)
+
   try {
-    if (source.startsWith('data:')) {
-      const filename = buildImageFilename(filenameSeed, index, inferImageExtension(source))
-      triggerDownload(source, filename)
-      return
-    }
-
-    const response = await fetch(source)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-
-    const blob = await response.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const filename = buildImageFilename(filenameSeed, index, inferImageExtension(source, blob.type))
-    try {
-      triggerDownload(objectUrl, filename)
-    } finally {
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
-    }
+    link.click()
   } catch {
-    window.open(source, '_blank', 'noopener,noreferrer')
+    window.open(href, '_blank', 'noopener,noreferrer')
     setError('无法直接下载该图片，已为你打开原图链接。')
+  } finally {
+    link.remove()
+    if (href.startsWith('blob:')) {
+      window.setTimeout(() => URL.revokeObjectURL(href), 30_000)
+    }
   }
 }
 

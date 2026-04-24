@@ -5,7 +5,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { Pool } from 'pg'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -365,6 +365,28 @@ function extFromMime(mimeType) {
   return extByMime[String(mimeType || '').toLowerCase()] || '.bin'
 }
 
+function sanitizeDownloadFilename(value) {
+  return String(value || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function buildAssetDownloadFilename(asset, requestedName = '') {
+  const requested = sanitizeDownloadFilename(requestedName)
+  const ext = extFromMime(asset?.mime_type)
+  if (requested) {
+    return path.extname(requested) ? requested : `${requested}${ext}`
+  }
+  return `${asset?.public_token || 'playground-image'}${ext}`
+}
+
+function buildAttachmentDisposition(filename) {
+  const safeFilename = sanitizeDownloadFilename(filename) || 'download'
+  const asciiFilename = safeFilename.replace(/[^\x20-\x7E]/g, '_').replace(/"/g, "'")
+  return `attachment; filename="${asciiFilename}"; filename*=UTF-8''${encodeURIComponent(safeFilename)}`
+}
+
 function conversationSnapshotPath(userId, conversationId) {
   return path.join(conversationsRoot, String(userId), `${conversationId}.json`)
 }
@@ -465,6 +487,63 @@ async function uploadAssetToR2(token, buffer, mimeType) {
     ContentType: mimeType,
     CacheControl: 'public, max-age=31536000, immutable'
   }))
+}
+
+async function streamAssetFromR2(res, asset, { headOnly = false, downloadName = '' } = {}) {
+  if (!r2Client || !r2Bucket) {
+    throw appError(404, 'Asset file not found')
+  }
+
+  const key = assetObjectKey(asset.public_token)
+  if (!key) {
+    throw appError(404, 'Asset file not found')
+  }
+
+  let response
+  try {
+    response = await r2Client.send(new GetObjectCommand({
+      Bucket: r2Bucket,
+      Key: key
+    }))
+  } catch {
+    throw appError(404, 'Asset file not found')
+  }
+
+  const headers = {
+    'Cache-Control': 'public, max-age=31536000, immutable',
+    'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+    'Content-Disposition': buildAttachmentDisposition(buildAssetDownloadFilename(asset, downloadName)),
+    'Content-Type': response.ContentType || asset.mime_type
+  }
+
+  const contentLength = Number(response.ContentLength || asset.size_bytes || 0)
+  if (contentLength > 0) {
+    headers['Content-Length'] = String(contentLength)
+  }
+
+  res.writeHead(200, headers)
+  if (headOnly) {
+    res.end()
+    return
+  }
+
+  const body = response.Body
+  if (!body) {
+    res.end()
+    return
+  }
+
+  if (typeof body.pipe === 'function') {
+    body.pipe(res)
+    return
+  }
+
+  if (typeof body.transformToWebStream === 'function') {
+    Readable.fromWeb(body.transformToWebStream()).pipe(res)
+    return
+  }
+
+  throw appError(500, 'Unsupported asset stream')
 }
 
 async function persistAssetBinary(asset, buffer, mimeType) {
@@ -1511,6 +1590,8 @@ const server = createServer(async (req, res) => {
       if (!token) {
         throw appError(400, 'Asset token is required')
       }
+      const wantsDownload = url.searchParams.get('download') === '1'
+      const downloadName = typeof url.searchParams.get('filename') === 'string' ? url.searchParams.get('filename') : ''
       const asset = await getAssetByToken(token)
       if (!asset) {
         throw appError(404, 'Asset not found')
@@ -1519,6 +1600,13 @@ const server = createServer(async (req, res) => {
       if (!existsSync(filePath)) {
         if (!r2Configured) {
           throw appError(404, 'Asset file not found')
+        }
+        if (wantsDownload) {
+          await streamAssetFromR2(res, asset, {
+            headOnly: req.method === 'HEAD',
+            downloadName
+          })
+          return
         }
         const redirectUrl = assetImageUrl(asset.public_token)
         if (!redirectUrl) {
@@ -1532,11 +1620,16 @@ const server = createServer(async (req, res) => {
         res.end()
         return
       }
-      res.writeHead(200, {
+      const headers = {
         'Cache-Control': 'public, max-age=31536000, immutable',
         'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+        'Content-Length': String(asset.size_bytes),
         'Content-Type': asset.mime_type
-      })
+      }
+      if (wantsDownload) {
+        headers['Content-Disposition'] = buildAttachmentDisposition(buildAssetDownloadFilename(asset, downloadName))
+      }
+      res.writeHead(200, headers)
       if (req.method === 'HEAD') {
         res.end()
         return
