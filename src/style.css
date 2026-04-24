@@ -320,10 +320,14 @@ h2 {
 
 .creator-grid {
   display: grid;
-  grid-template-columns: minmax(220px, 0.72fr) minmax(520px, 1.8fr) minmax(340px, 0.88fr);
+  grid-template-columns: minmax(236px, 0.28fr) minmax(0, 1fr);
   gap: 18px;
   height: calc(100vh - 56px);
   min-width: 0;
+}
+
+.creator-grid.sessions-is-collapsed {
+  grid-template-columns: 76px minmax(0, 1fr);
 }
 
 .sessions,
@@ -337,6 +341,67 @@ h2 {
 .image {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+}
+
+.sessions {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  transition: width 180ms ease, padding 180ms ease;
+}
+
+.sessions.collapsed {
+  place-items: center;
+  align-content: start;
+  gap: 12px;
+  padding: 12px;
+}
+
+.session-header {
+  gap: 10px;
+}
+
+.session-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.session-current {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.78rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-rail-button,
+.session-rail-new {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  box-shadow: none;
+}
+
+.session-rail-button {
+  gap: 6px;
+  min-height: 116px;
+  padding: 12px 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline: 1px solid rgba(255, 79, 46, 0.22);
+  writing-mode: vertical-rl;
+}
+
+.session-rail-button strong {
+  writing-mode: horizontal-tb;
+}
+
+.session-rail-new {
+  height: 52px;
+  padding: 0;
+  font-size: 1.25rem;
 }
 
 .panel-header {
@@ -363,9 +428,9 @@ h2 {
 }
 
 .top-controls select {
-  flex: 1 1 180px;
+  flex: 1 1 148px;
   min-width: 0;
-  max-width: 260px;
+  max-width: 230px;
 }
 
 .top-controls button {
@@ -385,14 +450,25 @@ h2 {
 
 .chat {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.creator-toolbar {
+  display: grid;
+  grid-template-columns: auto auto minmax(260px, 1fr);
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 12px;
+}
+
+.creator-title .eyebrow {
+  margin-bottom: 0.35rem;
 }
 
 .mode-tabs {
   display: inline-flex;
   gap: 6px;
   width: fit-content;
-  margin-bottom: 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 5px;
@@ -410,6 +486,52 @@ h2 {
 .mode-tabs button.active {
   color: #fff;
   background: var(--ink);
+}
+
+.images-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 92px;
+  z-index: 11;
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  padding: 0.72rem 1rem;
+  background: var(--accent);
+}
+
+.images-fab strong {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: #fff;
+  font-size: 0.78rem;
+}
+
+.image-panel-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 12;
+  background: rgba(15, 23, 42, 0.22);
+  backdrop-filter: blur(6px);
+}
+
+.image-drawer {
+  position: fixed;
+  top: 28px;
+  right: 28px;
+  bottom: 28px;
+  z-index: 14;
+  width: min(420px, calc(100vw - 56px));
+}
+
+.image-drawer-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .direct-form {
@@ -773,19 +895,18 @@ h2 {
 @media (max-width: 1180px) {
   .creator-grid {
     grid-template-columns: 220px minmax(0, 1fr);
-    height: auto;
-  }
-
-  .image {
-    grid-column: 1 / -1;
-  }
-
-  .local-gallery {
-    max-height: none;
   }
 
   .gallery-masonry {
     column-count: 3;
+  }
+
+  .creator-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .top-controls {
+    justify-content: flex-start;
   }
 }
 
@@ -811,9 +932,32 @@ h2 {
 
   .page-header,
   .login-card,
-  .creator-grid,
   .composer {
     grid-template-columns: 1fr;
+  }
+
+  .creator-grid,
+  .creator-grid.sessions-is-collapsed {
+    grid-template-columns: 1fr;
+    height: calc(100vh - 178px);
+  }
+
+  .sessions {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    bottom: 18px;
+    z-index: 13;
+    width: min(320px, calc(100vw - 36px));
+    transform: translateX(0);
+  }
+
+  .sessions.collapsed {
+    top: auto;
+    bottom: 92px;
+    width: 66px;
+    height: auto;
+    transform: none;
   }
 
   .page-header,
@@ -826,6 +970,30 @@ h2 {
   .top-controls {
     min-width: 0;
     width: 100%;
+  }
+
+  .top-controls select {
+    max-width: none;
+  }
+
+  .mode-tabs {
+    width: 100%;
+  }
+
+  .mode-tabs button {
+    flex: 1;
+  }
+
+  .image-drawer {
+    top: 18px;
+    right: 18px;
+    bottom: 18px;
+    width: calc(100vw - 36px);
+  }
+
+  .images-fab {
+    right: 18px;
+    bottom: 92px;
   }
 
   .direct-grid,

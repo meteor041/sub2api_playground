@@ -90,6 +90,8 @@ const imageToolInstructions = [
 const isAuthenticated = ref(hasAuthToken())
 const activeView = ref<'gallery' | 'create'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
+const sessionsCollapsed = ref(false)
+const imagesPanelOpen = ref(false)
 const email = ref('')
 const password = ref('')
 const loginBusy = ref(false)
@@ -159,6 +161,10 @@ const selectedImage = computed(() => (
 
 const selectedImageIndex = computed(() => (
   generatedImages.value.findIndex((image, index) => imageShareKey(image, index) === selectedImageKey.value)
+))
+
+const currentConversation = computed(() => (
+  conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
 
 interface ResponseFunctionCall {
@@ -1287,40 +1293,88 @@ onMounted(async () => {
         </section>
       </template>
 
-      <section v-else class="creator-grid">
-        <aside class="sessions panel">
-          <div class="panel-header compact">
-            <div>
-              <p class="eyebrow">Sessions</p>
-              <h2>对话</h2>
-            </div>
-            <button class="mini" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
-              新建
-            </button>
-          </div>
-
-          <div class="session-list">
+      <section v-else class="creator-grid" :class="{ 'sessions-is-collapsed': sessionsCollapsed }">
+        <aside class="sessions panel" :class="{ collapsed: sessionsCollapsed }">
+          <template v-if="sessionsCollapsed">
             <button
-              v-for="conversation in conversations"
-              :key="conversation.id"
-              class="session-item"
-              :class="{ active: conversation.id === currentConversationId }"
+              class="session-rail-button"
               type="button"
-              :disabled="conversationBusy"
-              @click="currentConversationId = conversation.id; handleConversationSelect()"
+              aria-label="展开会话列表"
+              @click="sessionsCollapsed = false"
             >
-              <strong>{{ conversation.title }}</strong>
-              <span>{{ conversation.lastMessageAt || conversation.updatedAt }}</span>
+              <span>会话</span>
+              <strong>{{ conversations.length }}</strong>
             </button>
-            <p v-if="conversations.length === 0" class="empty">暂无会话。</p>
-          </div>
+            <button
+              class="session-rail-new"
+              type="button"
+              aria-label="新建会话"
+              :disabled="conversationBusy || conversationSaving"
+              @click="startNewConversation"
+            >
+              +
+            </button>
+          </template>
+          <template v-else>
+            <div class="panel-header compact session-header">
+              <div>
+                <p class="eyebrow">Sessions</p>
+                <h2>对话</h2>
+                <span class="session-current">{{ currentConversation?.title || '暂无会话' }}</span>
+              </div>
+              <div class="session-header-actions">
+                <button class="ghost mini" type="button" aria-label="收起会话列表" @click="sessionsCollapsed = true">
+                  收起
+                </button>
+                <button class="mini" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
+                  新建
+                </button>
+              </div>
+            </div>
+
+            <div class="session-list">
+              <button
+                v-for="conversation in conversations"
+                :key="conversation.id"
+                class="session-item"
+                :class="{ active: conversation.id === currentConversationId }"
+                type="button"
+                :disabled="conversationBusy"
+                @click="currentConversationId = conversation.id; handleConversationSelect()"
+              >
+                <strong>{{ conversation.title }}</strong>
+                <span>{{ conversation.lastMessageAt || conversation.updatedAt }}</span>
+              </button>
+              <p v-if="conversations.length === 0" class="empty">暂无会话。</p>
+            </div>
+          </template>
         </aside>
 
         <section class="chat panel generator-card">
-          <div class="panel-header">
-            <div>
+          <div class="creator-toolbar">
+            <div class="creator-title">
               <p class="eyebrow">Create</p>
               <h2>创造空间</h2>
+            </div>
+            <div class="mode-tabs" role="tablist" aria-label="创造模式">
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="createMode === 'chat'"
+                :class="{ active: createMode === 'chat' }"
+                @click="createMode = 'chat'"
+              >
+                对话生图
+              </button>
+              <button
+                type="button"
+                role="tab"
+                :aria-selected="createMode === 'direct'"
+                :class="{ active: createMode === 'direct' }"
+                @click="createMode = 'direct'"
+              >
+                直接生图
+              </button>
             </div>
             <div class="top-controls">
               <select v-model="selectedTextModel">
@@ -1338,27 +1392,6 @@ onMounted(async () => {
                 创建 Key
               </button>
             </div>
-          </div>
-
-          <div class="mode-tabs" role="tablist" aria-label="创造模式">
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="createMode === 'chat'"
-              :class="{ active: createMode === 'chat' }"
-              @click="createMode = 'chat'"
-            >
-              对话生图
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :aria-selected="createMode === 'direct'"
-              :class="{ active: createMode === 'direct' }"
-              @click="createMode = 'direct'"
-            >
-              直接生图
-            </button>
           </div>
 
           <template v-if="createMode === 'chat'">
@@ -1496,13 +1529,43 @@ onMounted(async () => {
           </form>
         </section>
 
-        <aside class="image panel">
+        <button
+          class="images-fab"
+          type="button"
+          :aria-expanded="imagesPanelOpen"
+          aria-controls="session-images-panel"
+          @click="imagesPanelOpen = true"
+        >
+          图片
+          <strong>{{ generatedImages.length }}</strong>
+        </button>
+
+        <div
+          v-if="imagesPanelOpen"
+          class="image-panel-scrim"
+          aria-hidden="true"
+          @click="imagesPanelOpen = false"
+        ></div>
+
+        <aside
+          v-if="imagesPanelOpen"
+          id="session-images-panel"
+          class="image panel image-drawer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="当前会话图片"
+        >
           <div class="panel-header">
             <div>
               <p class="eyebrow">Images</p>
               <h2>当前图片</h2>
             </div>
-            <span class="pill">{{ imageModel }}</span>
+            <div class="image-drawer-actions">
+              <span class="pill">{{ imageModel }}</span>
+              <button class="ghost mini" type="button" aria-label="关闭图片栏" @click="imagesPanelOpen = false">
+                关闭
+              </button>
+            </div>
           </div>
 
           <div class="local-gallery">
