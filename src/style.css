@@ -633,9 +633,6 @@ h2 {
 
 .composer {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: end;
   margin-top: 14px;
 }
 
@@ -680,6 +677,54 @@ h2 {
   white-space: nowrap;
 }
 
+.composer-input-wrap {
+  position: relative;
+}
+
+.composer-input-wrap textarea {
+  min-height: 160px;
+  padding-right: 116px;
+  padding-bottom: 46px;
+}
+
+.composer-inline-actions {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  transform: translateY(-50%);
+}
+
+.composer-icon-button {
+  display: inline-grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  color: var(--ink);
+  background: rgba(241, 243, 245, 0.96);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+}
+
+.composer-icon-button.send {
+  color: #fff;
+  background: var(--ink);
+  outline: 0;
+}
+
+.composer-icon-button svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .composer-tools,
 .image-actions {
   display: flex;
@@ -689,6 +734,9 @@ h2 {
 }
 
 .composer-hint {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
   color: var(--muted);
   font-size: 0.86rem;
 }
@@ -982,6 +1030,25 @@ h2 {
 
   .mode-tabs button {
     flex: 1;
+  }
+
+  .composer-input-wrap textarea {
+    padding-right: 0.95rem;
+    padding-bottom: 92px;
+  }
+
+  .composer-inline-actions {
+    top: auto;
+    right: 14px;
+    bottom: 14px;
+    transform: none;
+  }
+
+  .composer-hint {
+    right: auto;
+    left: 16px;
+    bottom: 28px;
+    max-width: calc(100% - 138px);
   }
 
   .image-drawer {

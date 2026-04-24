@@ -1454,22 +1454,41 @@ onMounted(async () => {
                   </div>
                 </article>
               </div>
-              <textarea
-                v-model="chatInput"
-                rows="4"
-                placeholder="输入文字对话内容；明确要求画图时，模型会自动调用生图工具。"
-                @paste="handleComposerPaste"
-              />
-              <div class="composer-tools">
-                <button class="secondary" type="button" :disabled="chatBusy" @click="openComposerFilePicker">
-                  添加图片
-                </button>
+              <div class="composer-input-wrap">
+                <textarea
+                  v-model="chatInput"
+                  rows="4"
+                  placeholder="输入文字对话内容；明确要求画图时，模型会自动调用生图工具。"
+                  @paste="handleComposerPaste"
+                />
+                <div class="composer-inline-actions">
+                  <button
+                    class="composer-icon-button"
+                    type="button"
+                    :disabled="chatBusy"
+                    aria-label="添加图片"
+                    title="添加图片"
+                    @click="openComposerFilePicker"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                  </button>
+                  <button
+                    class="composer-icon-button send"
+                    type="submit"
+                    :disabled="chatBusy || !selectedKeySecret"
+                    :aria-label="chatBusy ? '发送中' : '发送对话'"
+                    :title="chatBusy ? '发送中' : '发送对话'"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M5 12h13M13 6l6 6-6 6" />
+                    </svg>
+                  </button>
+                </div>
                 <span class="composer-hint">支持复制截图后直接粘贴。</span>
               </div>
             </div>
-            <button :disabled="chatBusy || !selectedKeySecret" type="submit">
-              {{ chatBusy ? '发送中...' : '发送' }}
-            </button>
             </form>
           </template>
 
