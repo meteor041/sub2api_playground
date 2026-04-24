@@ -61,7 +61,7 @@ VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 
 浏览器本身不会直接连接 PostgreSQL。会话元数据会写入你通过 `DATABASE_URL` 提供的本地 PostgreSQL，大体积内容则写到挂载的 `PLAYGROUND_DATA_DIR` 目录。
 
-如果同时配置了 `R2_ENDPOINT`、`R2_BUCKET`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，用户上传图片和生成结果图片也会写入 Cloudflare R2。对象 key 使用资产的 `public_token`，而 `PLAYGROUND_IMAGE_CDN_BASE` 应该指向这个 bucket 对外提供的 CDN 前缀。
+如果同时配置了 `R2_ENDPOINT`、`R2_BUCKET`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，用户上传图片和生成结果图片也会写入 Cloudflare R2。最终公开 URL 仍然是 `${PLAYGROUND_IMAGE_CDN_BASE}/${public_token}`，而实际写入 R2 的 object key 会根据 `PLAYGROUND_IMAGE_CDN_BASE` 里的路径前缀自动推导。
 
 ## 异步生图任务
 
@@ -191,7 +191,7 @@ docker compose -f docker-compose.example.yml up -d --build
 - `R2_SECRET_ACCESS_KEY=...`
 - `PLAYGROUND_KEEP_LOCAL_ASSETS=false`
 
-当 `R2_*` 配置完整后，服务会在 `persistAsset()` 时把图片字节上传到 R2。旧的 `/api/playground/assets/:token` 路由仍然保留：本地文件存在时继续直接返回，不存在时会跳转到 CDN URL。
+当 `R2_*` 配置完整后，服务会在 `persistAsset()` 时把图片字节上传到 R2。R2 object key 会跟随 `PLAYGROUND_IMAGE_CDN_BASE` 里的路径，例如 `https://img.meteor041.com/meteor-images/<token>` 会对应到 R2 中的 `meteor-images/<token>`。旧的 `/api/playground/assets/:token` 路由仍然保留：本地文件存在时继续直接返回，不存在时会跳转到 CDN URL。
 
 对于历史上已经落在本地磁盘里的图片，可以运行一次性迁移脚本：
 

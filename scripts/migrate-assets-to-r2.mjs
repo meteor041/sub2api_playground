@@ -10,6 +10,7 @@ const __dirname = path.dirname(__filename)
 const repoRoot = path.resolve(__dirname, '..')
 const dataRoot = path.resolve(process.env.PLAYGROUND_DATA_DIR || path.join(repoRoot, 'data', 'playground'))
 const assetsRoot = path.join(dataRoot, 'assets')
+const imageCdnBase = String(process.env.PLAYGROUND_IMAGE_CDN_BASE || '').trim().replace(/\/$/, '')
 
 function printHelp() {
   console.log(`
@@ -34,6 +35,7 @@ Required environment variables:
 Optional environment variables:
   R2_REGION           Default: auto
   PLAYGROUND_DATA_DIR Default: ./data/playground
+  PLAYGROUND_IMAGE_CDN_BASE  Used to derive the R2 object key prefix.
 
 Examples:
   npm run migrate:r2 -- --dry-run
@@ -123,6 +125,22 @@ function createR2Client() {
   })
 }
 
+function assetObjectKey(token) {
+  const key = String(token || '').trim().replace(/^\/+/, '')
+  if (!key) {
+    return ''
+  }
+  if (!imageCdnBase) {
+    return key
+  }
+  try {
+    const pathname = new URL(imageCdnBase).pathname.replace(/^\/+|\/+$/g, '')
+    return pathname ? `${pathname}/${key}` : key
+  } catch {
+    return key
+  }
+}
+
 async function listAssets(pool, options) {
   const clauses = []
   const values = []
@@ -167,7 +185,7 @@ async function objectExists(client, bucket, key) {
 async function uploadAsset(client, bucket, asset, filePath) {
   await client.send(new PutObjectCommand({
     Bucket: bucket,
-    Key: String(asset.public_token),
+    Key: assetObjectKey(asset.public_token),
     Body: createReadStream(filePath),
     ContentType: asset.mime_type,
     CacheControl: 'public, max-age=31536000, immutable'
@@ -195,7 +213,7 @@ async function mapWithConcurrency(items, concurrency, worker) {
 }
 
 async function migrateAsset(client, bucket, asset, options) {
-  const key = String(asset.public_token)
+  const key = assetObjectKey(asset.public_token)
   if (!options.force) {
     const exists = await objectExists(client, bucket, key)
     if (exists) {
@@ -258,6 +276,7 @@ async function main() {
     console.log(`Data root: ${dataRoot}`)
     console.log(`Assets root: ${assetsRoot}`)
     console.log(`R2 bucket: ${bucket}`)
+    console.log(`R2 key prefix: ${assetObjectKey('example').replace(/\/example$/, '') || '(none)'}`)
     if (options.dryRun) {
       console.log('Mode: dry-run')
     }

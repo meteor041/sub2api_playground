@@ -414,6 +414,19 @@ function assetImageUrl(token) {
   return key ? `${imageCdnBase}/${key}` : ''
 }
 
+function assetObjectKey(token) {
+  const key = typeof token === 'string' ? token.trim().replace(/^\/+/, '') : ''
+  if (!key) {
+    return ''
+  }
+  try {
+    const pathname = new URL(imageCdnBase).pathname.replace(/^\/+|\/+$/g, '')
+    return pathname ? `${pathname}/${key}` : key
+  } catch {
+    return key
+  }
+}
+
 function resolveImageUrl(assetToken, remoteUrl) {
   const assetUrl = assetImageUrl(assetToken)
   if (assetUrl) {
@@ -441,7 +454,7 @@ async function uploadAssetToR2(token, buffer, mimeType) {
   if (!r2Client || !r2Bucket) {
     return
   }
-  const key = String(token || '').trim()
+  const key = assetObjectKey(token)
   if (!key) {
     throw appError(500, 'Asset token is required for R2 upload')
   }

@@ -59,7 +59,7 @@ browser -> image-playground Node BFF -> sub2api backend
 
 The browser does not connect to PostgreSQL directly. Conversation metadata is stored in the local PostgreSQL you provide through `DATABASE_URL`, while large payloads are written to the mounted playground data directory.
 
-If `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` are all configured, uploaded images and generated images are also written to Cloudflare R2. The object key is the asset `public_token`, and `PLAYGROUND_IMAGE_CDN_BASE` should point to the public CDN prefix for that bucket.
+If `R2_ENDPOINT`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, and `R2_SECRET_ACCESS_KEY` are all configured, uploaded images and generated images are also written to Cloudflare R2. The final public URL is still `${PLAYGROUND_IMAGE_CDN_BASE}/${public_token}`, and the actual R2 object key is derived from the path prefix inside `PLAYGROUND_IMAGE_CDN_BASE`.
 
 ## Async Image Tasks
 
@@ -189,7 +189,7 @@ Set these environment variables on the Node server container:
 - `R2_SECRET_ACCESS_KEY=...`
 - `PLAYGROUND_KEEP_LOCAL_ASSETS=false`
 
-When `R2_*` is complete, the service uploads asset bytes to R2 during `persistAsset()`. The old `/api/playground/assets/:token` route still works: it serves the local copy when present and otherwise redirects to the CDN URL.
+When `R2_*` is complete, the service uploads asset bytes to R2 during `persistAsset()`. The R2 object key follows the path inside `PLAYGROUND_IMAGE_CDN_BASE`, so `https://img.meteor041.com/meteor-images/<token>` maps to the object key `meteor-images/<token>`. The old `/api/playground/assets/:token` route still works: it serves the local copy when present and otherwise redirects to the CDN URL.
 
 For historical local assets, run the one-time migration script:
 
