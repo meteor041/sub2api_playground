@@ -19,6 +19,7 @@ ENV PLAYGROUND_ENABLE_CF_IMAGE_RESIZING=false
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
+COPY scripts ./scripts
 COPY server.mjs ./server.mjs
 EXPOSE 8081
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -q -T 5 -O /dev/null http://127.0.0.1:8081/health || exit 1
