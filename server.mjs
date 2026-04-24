@@ -138,8 +138,19 @@ async function ensureRuntime() {
   `)
 
   await db.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_playground_gallery_source
-    ON playground_gallery_items (shared_by_user_id, source_conversation_id, source_image_id)
+    DROP INDEX IF EXISTS idx_playground_gallery_source
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_gallery_asset
+    ON playground_gallery_items (shared_by_user_id, asset_token)
+    WHERE asset_token IS NOT NULL
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_gallery_remote
+    ON playground_gallery_items (shared_by_user_id, remote_url)
+    WHERE remote_url IS NOT NULL
   `)
 
   await db.query(`
@@ -649,6 +660,7 @@ async function normalizeStateForStorage(userId, state) {
 
     storedGeneratedImages.push({
       id: image.id,
+      shareKey: image.shareKey || null,
       prompt: image.prompt,
       size: image.size,
       createdAt: image.createdAt,
@@ -726,6 +738,7 @@ async function hydrateConversationState(snapshot) {
 
     generatedImages.push({
       id: image.id,
+      shareKey: image.shareKey || undefined,
       prompt: image.prompt,
       size: image.size,
       dataUrl,
@@ -875,23 +888,51 @@ async function listGalleryItems() {
 async function shareGalleryImage(user, body) {
   const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.trim() : ''
   const imageId = typeof body?.image_id === 'string' ? body.image_id.trim() : ''
+  const requestedAssetToken = typeof body?.asset_token === 'string' ? body.asset_token.trim() : ''
+  const requestedRemoteUrl = typeof body?.remote_url === 'string' ? body.remote_url.trim() : ''
   if (!conversationId || !imageId) {
     throw appError(400, 'conversation_id and image_id are required')
   }
 
   const conversation = await loadConversation(user.id, conversationId)
-  const image = conversation.state.generatedImages.find((item) => item.id === imageId)
+  const candidates = conversation.state.generatedImages.filter((item) => item.id === imageId)
+  const image = candidates.find((item) => (
+    (requestedAssetToken && item.assetToken === requestedAssetToken) ||
+    (requestedRemoteUrl && item.remoteUrl === requestedRemoteUrl)
+  )) || candidates[0]
   if (!image) {
     throw appError(404, 'Generated image not found in this conversation')
   }
 
   const assetToken = image.assetToken || null
   const remoteUrl = image.remoteUrl || null
+  if (requestedAssetToken && assetToken !== requestedAssetToken) {
+    throw appError(404, 'Generated image asset does not match this conversation')
+  }
+  if (requestedRemoteUrl && remoteUrl !== requestedRemoteUrl) {
+    throw appError(404, 'Generated image URL does not match this conversation')
+  }
   if (!assetToken && !remoteUrl) {
     throw appError(409, 'Image is not persisted yet; save the conversation before sharing')
   }
 
   const pool = requireDb()
+  const existing = await pool.query(
+    `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+            shared_by_user_id, shared_by_name, created_at
+     FROM playground_gallery_items
+     WHERE shared_by_user_id = $1
+       AND (($2::uuid IS NOT NULL AND asset_token = $2::uuid) OR ($3::text IS NOT NULL AND remote_url = $3::text))
+     LIMIT 1`,
+    [user.id, assetToken, remoteUrl]
+  )
+  if (existing.rows[0]) {
+    return {
+      item: mapGalleryRow(existing.rows[0]),
+      alreadyExists: true
+    }
+  }
+
   const id = randomUUID()
   const sharedByName = user.username || user.email || `User ${user.id}`
   const result = await pool.query(
@@ -900,11 +941,8 @@ async function shareGalleryImage(user, body) {
        shared_by_user_id, shared_by_name, created_at, updated_at
      )
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
-     ON CONFLICT (shared_by_user_id, source_conversation_id, source_image_id)
-     DO UPDATE SET updated_at = playground_gallery_items.updated_at
      RETURNING id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
-               shared_by_user_id, shared_by_name, created_at,
-               (xmax <> 0) AS already_exists`,
+               shared_by_user_id, shared_by_name, created_at`,
     [
       id,
       assetToken,
@@ -920,7 +958,7 @@ async function shareGalleryImage(user, body) {
   const row = result.rows[0]
   return {
     item: mapGalleryRow(row),
-    alreadyExists: Boolean(row.already_exists)
+    alreadyExists: false
   }
 }
 

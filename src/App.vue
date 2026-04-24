@@ -97,8 +97,8 @@ const successMessage = ref('')
 const galleryItems = ref<GalleryItem[]>([])
 const galleryBusy = ref(false)
 const galleryScroller = ref<HTMLElement | null>(null)
-const sharingImageIds = ref<string[]>([])
-const sharedImageIds = ref<string[]>([])
+const sharingImageKeys = ref<string[]>([])
+const sharedImageKeys = ref<string[]>([])
 
 const profile = ref<UserProfile | null>(null)
 const apiKeys = ref<ApiKey[]>([])
@@ -121,6 +121,7 @@ const imageSize = ref(imageSizes[0])
 const imageBusy = ref(false)
 const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
+const selectedImageKey = ref('')
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
 
@@ -149,6 +150,14 @@ const balanceLabel = computed(() => {
 })
 
 const displayName = computed(() => profile.value?.username || profile.value?.email || '已登录用户')
+
+const selectedImage = computed(() => (
+  generatedImages.value.find((image, index) => imageShareKey(image, index) === selectedImageKey.value) || null
+))
+
+const selectedImageIndex = computed(() => (
+  generatedImages.value.findIndex((image, index) => imageShareKey(image, index) === selectedImageKey.value)
+))
 
 interface ResponseFunctionCall {
   type: 'function_call'
@@ -184,6 +193,35 @@ function sanitizeFilenamePart(value: string): string {
 function buildImageFilename(seed: string, index = 1): string {
   const safeSeed = sanitizeFilenamePart(seed) || 'playground-image'
   return `${safeSeed}-${index}.png`
+}
+
+function imageShareKey(image: GeneratedImage, index = 0): string {
+  return image.shareKey || image.assetToken || image.remoteUrl || `${image.id}:${image.createdAt}:${index}`
+}
+
+function normalizeGeneratedImages(images: GeneratedImage[]): GeneratedImage[] {
+  const seen = new Map<string, number>()
+  return images.map((image, index) => {
+    const baseKey = image.shareKey || image.assetToken || image.remoteUrl || `${image.id}:${image.createdAt || index}`
+    const count = seen.get(baseKey) || 0
+    seen.set(baseKey, count + 1)
+    return {
+      ...image,
+      shareKey: count === 0 ? baseKey : `${baseKey}:${count}`
+    }
+  })
+}
+
+function imageSourceUrl(image: GeneratedImage): string {
+  return image.dataUrl || image.remoteUrl || ''
+}
+
+function closeImageModal(): void {
+  selectedImageKey.value = ''
+}
+
+function openImageModal(image: GeneratedImage, index: number): void {
+  selectedImageKey.value = imageShareKey(image, index)
 }
 
 function triggerDownload(url: string, filename: string): void {
@@ -285,6 +323,8 @@ function resetConversationState(): void {
   persistActiveConversationId('')
   chatMessages.value = []
   generatedImages.value = []
+  selectedImageKey.value = ''
+  sharedImageKeys.value = []
 }
 
 async function refreshConversationIndex(): Promise<void> {
@@ -297,7 +337,9 @@ async function loadConversationById(conversationId: string): Promise<void> {
     const payload = await getConversation(conversationId)
     persistActiveConversationId(payload.conversation.id)
     chatMessages.value = payload.state.chatMessages || []
-    generatedImages.value = payload.state.generatedImages || []
+    generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
+    selectedImageKey.value = ''
+    sharedImageKeys.value = []
   } finally {
     conversationBusy.value = false
   }
@@ -311,6 +353,8 @@ async function startNewConversation(): Promise<void> {
     persistActiveConversationId(created.id)
     chatMessages.value = []
     generatedImages.value = []
+    selectedImageKey.value = ''
+    sharedImageKeys.value = []
   } finally {
     conversationBusy.value = false
   }
@@ -460,15 +504,28 @@ function scrollGallery(direction: 'left' | 'right'): void {
   })
 }
 
-function isImageShared(image: GeneratedImage): boolean {
-  return sharedImageIds.value.includes(image.id)
+function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
+  if (item.sourceConversationId !== currentConversationId.value) {
+    return false
+  }
+  const source = imageSourceUrl(image)
+  return (
+    (image.assetToken && item.imageUrl.endsWith(`/api/playground/assets/${image.assetToken}`)) ||
+    (image.remoteUrl && item.imageUrl === image.remoteUrl) ||
+    Boolean(source && item.imageUrl === source)
+  )
 }
 
-function isImageSharing(image: GeneratedImage): boolean {
-  return sharingImageIds.value.includes(image.id)
+function isImageShared(image: GeneratedImage, index = 0): boolean {
+  return sharedImageKeys.value.includes(imageShareKey(image, index)) ||
+    galleryItems.value.some((item) => imageMatchesGalleryItem(image, item))
 }
 
-async function handleShareImage(image: GeneratedImage): Promise<void> {
+function isImageSharing(image: GeneratedImage, index = 0): boolean {
+  return sharingImageKeys.value.includes(imageShareKey(image, index))
+}
+
+async function handleShareImage(image: GeneratedImage, index = 0): Promise<void> {
   if (!isAuthenticated.value) {
     activeView.value = 'create'
     setError('请先登录后再转发图片到公共画廊。')
@@ -478,18 +535,27 @@ async function handleShareImage(image: GeneratedImage): Promise<void> {
     setError('请先选择或创建一个会话。')
     return
   }
-  if (isImageSharing(image) || isImageShared(image)) {
+  const shareKey = imageShareKey(image, index)
+  if (isImageSharing(image, index) || isImageShared(image, index)) {
     return
   }
 
-  sharingImageIds.value = [...sharingImageIds.value, image.id]
+  sharingImageKeys.value = [...sharingImageKeys.value, shareKey]
   try {
     await persistConversationSnapshot()
+    const persisted = await getConversation(currentConversationId.value)
+    const persistedImages = normalizeGeneratedImages(persisted.state.generatedImages || [])
+    const shareImage = persistedImages.find((item, itemIndex) => imageShareKey(item, itemIndex) === shareKey) ||
+      persistedImages[index] ||
+      image
+    generatedImages.value = persistedImages
     const result = await shareGalleryImage({
       conversationId: currentConversationId.value,
-      imageId: image.id
+      imageId: shareImage.id,
+      assetToken: shareImage.assetToken,
+      remoteUrl: shareImage.remoteUrl
     })
-    sharedImageIds.value = [...new Set([...sharedImageIds.value, image.id])]
+    sharedImageKeys.value = [...new Set([...sharedImageKeys.value, shareKey])]
     galleryItems.value = [
       result.item,
       ...galleryItems.value.filter((item) => item.id !== result.item.id)
@@ -498,7 +564,7 @@ async function handleShareImage(image: GeneratedImage): Promise<void> {
   } catch (error) {
     setError(error instanceof Error ? error.message : '转发到公共画廊失败')
   } finally {
-    sharingImageIds.value = sharingImageIds.value.filter((id) => id !== image.id)
+    sharingImageKeys.value = sharingImageKeys.value.filter((key) => key !== shareKey)
   }
 }
 
@@ -972,7 +1038,7 @@ async function handleSendChat(): Promise<void> {
       throw new Error('图片生成成功，但响应中没有可展示的图片。')
     }
 
-    generatedImages.value = [...images, ...generatedImages.value]
+    generatedImages.value = normalizeGeneratedImages([...images, ...generatedImages.value])
 
     let finalMessage = `已根据提示词生成图片：${toolArgs.prompt}`
     try {
@@ -1028,6 +1094,7 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
       const remoteUrl = typeof item.url === 'string' ? item.url : ''
       return {
         id: uid('image'),
+        shareKey: uid('share'),
         prompt,
         size,
         dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined,
@@ -1042,6 +1109,7 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
   return (task.result?.images || [])
     .map((item, index) => ({
       id: `${task.task_id}-${item.id || index + 1}`,
+      shareKey: `${task.task_id}-${item.id || index + 1}`,
       prompt: item.prompt,
       size: item.size,
       dataUrl: item.data_url || undefined,
@@ -1086,7 +1154,7 @@ async function handleGenerateImage(): Promise<void> {
     if (images.length === 0) {
       throw new Error('图片生成成功，但响应中没有可展示的图片。')
     }
-    generatedImages.value = [...images, ...generatedImages.value]
+    generatedImages.value = normalizeGeneratedImages([...images, ...generatedImages.value])
     chatMessages.value.push({
       id: uid('assistant-image'),
       role: 'assistant',
@@ -1412,27 +1480,42 @@ onMounted(async () => {
             </button>
           </form>
 
-          <div class="gallery local-gallery">
-            <article v-for="image in generatedImages" :key="image.id" class="image-card">
-              <img v-if="image.dataUrl || image.remoteUrl" :src="image.dataUrl || image.remoteUrl" :alt="image.prompt" />
-              <p>{{ image.prompt }}</p>
-              <div class="image-card-footer">
+          <div class="local-gallery">
+            <article
+              v-for="(image, index) in generatedImages"
+              :key="imageShareKey(image, index)"
+              class="image-thumb"
+              :class="{ active: selectedImageKey === imageShareKey(image, index) }"
+              @click="openImageModal(image, index)"
+            >
+              <img v-if="imageSourceUrl(image)" :src="imageSourceUrl(image)" :alt="image.prompt" />
+              <div class="thumb-overlay">
                 <span>{{ image.size }}</span>
-                <div class="image-actions">
+                <div class="image-actions" @click.stop>
                   <button
-                    class="ghost mini"
+                    class="icon-button"
                     type="button"
-                    @click="downloadImage(image.dataUrl || image.remoteUrl || '', image.prompt)"
+                    aria-label="下载图片"
+                    @click="downloadImage(imageSourceUrl(image), image.prompt)"
                   >
-                    下载
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                    </svg>
                   </button>
                   <button
-                    class="mini"
+                    class="icon-button"
                     type="button"
-                    :disabled="isImageSharing(image) || isImageShared(image)"
-                    @click="handleShareImage(image)"
+                    :class="{ shared: isImageShared(image, index) }"
+                    :disabled="isImageSharing(image, index) || isImageShared(image, index)"
+                    :aria-label="isImageShared(image, index) ? '已转发' : '转发到画廊'"
+                    @click="handleShareImage(image, index)"
                   >
-                    {{ isImageShared(image) ? '已转发' : (isImageSharing(image) ? '转发中...' : '转发') }}
+                    <svg v-if="isImageShared(image, index)" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -1444,6 +1527,55 @@ onMounted(async () => {
         </aside>
       </section>
     </section>
+
+    <div
+      v-if="selectedImage"
+      class="image-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-label="图片详情"
+      @click.self="closeImageModal"
+    >
+      <article class="image-modal-card">
+        <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
+        <div class="modal-image-wrap">
+          <img :src="imageSourceUrl(selectedImage)" :alt="selectedImage.prompt" />
+          <div class="modal-actions">
+            <button
+              class="icon-button"
+              type="button"
+              aria-label="下载图片"
+              @click="downloadImage(imageSourceUrl(selectedImage), selectedImage.prompt)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+              </svg>
+            </button>
+            <button
+              class="icon-button"
+              type="button"
+              :class="{ shared: isImageShared(selectedImage, selectedImageIndex) }"
+              :disabled="isImageSharing(selectedImage, selectedImageIndex) || isImageShared(selectedImage, selectedImageIndex)"
+              :aria-label="isImageShared(selectedImage, selectedImageIndex) ? '已转发' : '转发到画廊'"
+              @click="handleShareImage(selectedImage, selectedImageIndex)"
+            >
+              <svg v-if="isImageShared(selectedImage, selectedImageIndex)" viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="modal-copy">
+          <p class="eyebrow">Prompt</p>
+          <h2>{{ selectedImage.size }}</h2>
+          <p>{{ selectedImage.prompt }}</p>
+          <small>{{ new Date(selectedImage.createdAt).toLocaleString() }}</small>
+        </div>
+      </article>
+    </div>
 
     <p v-if="errorMessage" class="toast error">{{ errorMessage }}</p>
     <p v-if="successMessage" class="toast success">{{ successMessage }}</p>

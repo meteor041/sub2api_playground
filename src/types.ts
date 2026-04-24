@@ -70,6 +70,7 @@ export interface ChatMessage {
 
 export interface GeneratedImage {
   id: string
+  shareKey?: string
   prompt: string
   size: string
   dataUrl?: string

@@ -354,12 +354,16 @@ export function listGalleryItems(): Promise<GalleryItem[]> {
 export function shareGalleryImage(payload: {
   conversationId: string
   imageId: string
+  assetToken?: string
+  remoteUrl?: string
 }): Promise<ShareGalleryResponse> {
   return request<ShareGalleryResponse>('/api/playground/gallery', {
     method: 'POST',
     body: JSON.stringify({
       conversation_id: payload.conversationId,
-      image_id: payload.imageId
+      image_id: payload.imageId,
+      asset_token: payload.assetToken || null,
+      remote_url: payload.remoteUrl || null
     })
   })
 }
