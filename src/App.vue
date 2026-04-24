@@ -45,6 +45,7 @@ const imageSizes = ['1024x1024', '1536x1024', '1024x1536']
 const maxImageToolCallsPerTurn = 1
 const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
+const THEME_MODE_KEY = 'playground_theme_mode'
 const imageGenerationTool = {
   type: 'function',
   name: 'generate_image',
@@ -91,6 +92,7 @@ const imageToolInstructions = [
 const isAuthenticated = ref(hasAuthToken())
 const activeView = ref<'gallery' | 'create'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
+const themeMode = ref<'light' | 'dark'>('light')
 const sessionsCollapsed = ref(false)
 const imagesPanelOpen = ref(false)
 const email = ref('')
@@ -317,8 +319,23 @@ function setSuccess(message: string): void {
   errorMessage.value = ''
 }
 
+function applyThemeMode(mode: 'light' | 'dark'): void {
+  themeMode.value = mode
+  document.documentElement.dataset.theme = mode
+  localStorage.setItem(THEME_MODE_KEY, mode)
+}
+
+function initializeThemeMode(): void {
+  const savedMode = localStorage.getItem(THEME_MODE_KEY)
+  applyThemeMode(savedMode === 'dark' ? 'dark' : 'light')
+}
+
+function toggleThemeMode(): void {
+  applyThemeMode(themeMode.value === 'dark' ? 'light' : 'dark')
+}
+
 function applyBranding(): void {
-  document.title = 'Sub2API Image Playground'
+  document.title = 'MeteorAPI Image Playground'
 
   let favicon = document.querySelector<HTMLLinkElement>('link[rel="icon"]')
   if (!favicon) {
@@ -1423,6 +1440,7 @@ async function refreshBalanceOnly(): Promise<void> {
 }
 
 onMounted(async () => {
+  initializeThemeMode()
   applyBranding()
   await refreshGallery()
   if (isAuthenticated.value) {
@@ -1437,12 +1455,22 @@ onMounted(async () => {
   <main class="app-shell">
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-logo" :src="logoUrl" alt="Sub2API logo" />
+        <img class="brand-logo" :src="logoUrl" alt="MeteorAPI logo" />
         <div>
           <strong>Image Lab</strong>
-          <span>Sub2API</span>
+          <span>MeteorAPI</span>
         </div>
       </div>
+
+      <button class="theme-toggle" type="button" :aria-label="themeMode === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleThemeMode">
+        <span>{{ themeMode === 'dark' ? '黑夜' : '白天' }}</span>
+        <svg v-if="themeMode === 'dark'" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M20 14.5A7.5 7.5 0 0 1 9.5 4a8.3 8.3 0 1 0 10.5 10.5Z" />
+        </svg>
+      </button>
 
       <nav class="side-nav" aria-label="Primary">
         <button :class="{ active: activeView === 'gallery' }" type="button" @click="activeView = 'gallery'">
