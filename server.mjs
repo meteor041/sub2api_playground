@@ -13,6 +13,7 @@ const __dirname = path.dirname(__filename)
 const port = Number.parseInt(process.env.PORT || '8081', 10)
 const upstream = (process.env.METEORAPI_UPSTREAM || process.env.SUB2API_UPSTREAM || 'https://meteor041.com').replace(/\/$/, '')
 const publicOrigin = (process.env.PLAYGROUND_PUBLIC_ORIGIN || '').replace(/\/$/, '')
+const imageCdnBase = (process.env.PLAYGROUND_IMAGE_CDN_BASE || 'https://img.meteor041.com/meteor-images').replace(/\/$/, '')
 const cloudflareImageResizingEnabled = process.env.PLAYGROUND_ENABLE_CF_IMAGE_RESIZING === 'true'
 const thumbnailWidth = Number.parseInt(process.env.PLAYGROUND_THUMBNAIL_WIDTH || '480', 10)
 const staticRoot = path.join(__dirname, 'dist')
@@ -302,7 +303,8 @@ function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
         prompt: fallbackPrompt,
         size: fallbackSize,
         data_url: b64 ? `data:image/png;base64,${b64}` : null,
-        remote_url: remoteUrl || null
+        remote_url: remoteUrl || null,
+        image_url: remoteUrl || null
       }
     })
     .filter(Boolean)
@@ -384,6 +386,20 @@ function assetPublicUrl(token) {
   return `/api/playground/assets/${token}`
 }
 
+function assetImageUrl(token) {
+  const key = typeof token === 'string' ? token.trim().replace(/^\/+/, '') : ''
+  return key ? `${imageCdnBase}/${key}` : ''
+}
+
+function resolveImageUrl(assetToken, remoteUrl) {
+  const assetUrl = assetImageUrl(assetToken)
+  if (assetUrl) {
+    return assetUrl
+  }
+  const directUrl = typeof remoteUrl === 'string' ? remoteUrl.trim() : ''
+  return directUrl || null
+}
+
 function absolutePublicUrl(req, value) {
   if (/^https?:\/\//i.test(value)) {
     return value
@@ -459,7 +475,8 @@ async function hydrateAssetRef(assetRef) {
     name: assetRef.name || path.basename(asset.file_path),
     mimeType: asset.mime_type,
     dataUrl: assetPublicUrl(asset.public_token),
-    assetToken: asset.public_token
+    assetToken: asset.public_token,
+    image_url: resolveImageUrl(asset.public_token, '')
   }
 }
 
@@ -531,6 +548,19 @@ async function callImageUpstream(task) {
 
 function buildTaskResponse(task) {
   const status = task.status === 'completed' && !task.archived ? 'processing' : task.status
+  const result = status === 'completed' && task.result && typeof task.result === 'object'
+    ? {
+      ...task.result,
+      images: Array.isArray(task.result.images)
+        ? task.result.images.map((image) => ({
+          ...image,
+          image_url: typeof image?.image_url === 'string' && image.image_url.trim()
+            ? image.image_url.trim()
+            : resolveImageUrl('', image?.remote_url)
+        }))
+        : []
+    }
+    : null
   return {
     task_id: task.id,
     status,
@@ -541,7 +571,7 @@ function buildTaskResponse(task) {
     created_at: task.createdAt,
     updated_at: task.updatedAt,
     error: task.error || null,
-    result: status === 'completed' ? task.result : null
+    result
   }
 }
 
@@ -625,6 +655,9 @@ function buildTaskImageItems(task) {
       size: image.size || task.payload.size,
       dataUrl: image.data_url || undefined,
       remoteUrl: image.remote_url || undefined,
+      image_url: typeof image.image_url === 'string' && image.image_url.trim()
+        ? image.image_url.trim()
+        : (resolveImageUrl('', image.remote_url) || undefined),
       createdAt: Date.now()
     }))
     .filter((image) => image.dataUrl || image.remoteUrl)
@@ -649,8 +682,9 @@ async function archiveImageTaskToConversation(task) {
   }
 
   const conversation = await loadConversation(task.userId, task.payload.conversation_id)
+  const taskImages = task.status === 'completed' ? buildTaskImageItems(task) : []
   const nextImages = task.status === 'completed'
-    ? [...buildTaskImageItems(task), ...conversation.state.generatedImages]
+    ? [...taskImages, ...conversation.state.generatedImages]
     : conversation.state.generatedImages
   const firstImage = nextImages[0] || null
   const assistantMessageId = task.payload.assistant_message_id || `assistant-image-${task.id}`
@@ -665,7 +699,7 @@ async function archiveImageTaskToConversation(task) {
     content,
     createdAt: Date.now(),
     imageDataUrl: task.status === 'completed' && firstImage
-      ? firstImage.dataUrl || firstImage.remoteUrl
+      ? firstImage.dataUrl || firstImage.image_url || firstImage.remoteUrl
       : undefined
   })
 
@@ -673,6 +707,31 @@ async function archiveImageTaskToConversation(task) {
     chatMessages: nextMessages,
     generatedImages: nextImages
   })
+  if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
+    const originalResultImages = task.result.images
+    const hydratedConversation = await loadConversation(task.userId, task.payload.conversation_id)
+    const taskImageIds = new Set(taskImages.map((image) => image.id))
+    const hydratedImageMap = new Map(
+      hydratedConversation.state.generatedImages
+        .filter((image) => taskImageIds.has(image.id))
+        .map((image) => [image.id, image])
+    )
+    task.result = {
+      ...task.result,
+      images: taskImages.map((taskImage, index) => {
+        const originalImage = originalResultImages[index] || {}
+        const hydratedImage = hydratedImageMap.get(taskImage.id)
+        return {
+          id: originalImage.id || `image-${index + 1}`,
+          prompt: hydratedImage?.prompt || taskImage.prompt,
+          size: hydratedImage?.size || taskImage.size,
+          data_url: hydratedImage?.dataUrl || taskImage.dataUrl || null,
+          remote_url: hydratedImage?.remoteUrl || taskImage.remoteUrl || null,
+          image_url: hydratedImage?.image_url || taskImage.image_url || null
+        }
+      })
+    }
+  }
   task.archived = true
   task.updatedAt = nowIso()
   await updatePersistedImageTask(task)
@@ -926,12 +985,14 @@ async function hydrateConversationState(snapshot) {
           id: attachment.id,
           name: attachment.name || 'image.png',
           mimeType: attachment.mimeType || 'image/png',
-          dataUrl: attachment.externalUrl
+          dataUrl: attachment.externalUrl,
+          image_url: attachment.externalUrl
         })
       }
     }
 
     let imageDataUrl = message.externalImageUrl || undefined
+    let image_url = message.externalImageUrl || undefined
     let imageAssetToken
     if (!imageDataUrl && message.imageAssetToken) {
       const hydratedImage = await hydrateAssetRef({
@@ -942,6 +1003,7 @@ async function hydrateConversationState(snapshot) {
       })
       imageDataUrl = hydratedImage?.dataUrl
       imageAssetToken = hydratedImage?.assetToken
+      image_url = hydratedImage?.image_url
     }
 
     chatMessages.push({
@@ -951,7 +1013,8 @@ async function hydrateConversationState(snapshot) {
       createdAt: Number(message.createdAt) || Date.now(),
       attachments: attachments.length > 0 ? attachments : undefined,
       imageDataUrl,
-      imageAssetToken
+      imageAssetToken,
+      image_url
     })
   }
 
@@ -978,7 +1041,8 @@ async function hydrateConversationState(snapshot) {
       dataUrl,
       remoteUrl: image.remoteUrl || undefined,
       createdAt: Number(image.createdAt) || Date.now(),
-      assetToken
+      assetToken,
+      image_url: resolveImageUrl(assetToken, image.remoteUrl)
     })
   }
 
@@ -1100,6 +1164,7 @@ function mapGalleryRow(row, req) {
     id: row.id,
     prompt: row.prompt,
     size: row.size,
+    image_url: resolveImageUrl(row.asset_token, row.remote_url),
     imageUrl: thumbnailUrl,
     thumbnailUrl,
     originalUrl,
