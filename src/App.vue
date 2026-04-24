@@ -101,7 +101,7 @@ const loginBusy = ref(false)
 const loadingApp = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
-const galleryBatchSize = 8
+const galleryBatchSize = 2
 const galleryItems = ref<GalleryItem[]>([])
 const galleryBusy = ref(false)
 const galleryLoadingMore = ref(false)
@@ -262,11 +262,23 @@ function openGalleryModal(item: GalleryItem): void {
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
   const image = event.currentTarget as HTMLImageElement | null
-  if (!image || !item.originalUrl || image.dataset.fallbackApplied === 'true') {
+  if (!image) {
+    return
+  }
+  if (image.dataset.thumbnailRetried !== 'true' && item.thumbnailUrl) {
+    image.dataset.thumbnailRetried = 'true'
+    window.setTimeout(() => {
+      image.src = `${item.thumbnailUrl}${item.thumbnailUrl.includes('?') ? '&' : '?'}retry=${Date.now()}`
+    }, 1500)
+    return
+  }
+  if (!item.originalUrl || image.dataset.fallbackApplied === 'true') {
     return
   }
   image.dataset.fallbackApplied = 'true'
-  image.src = item.originalUrl
+  window.setTimeout(() => {
+    image.src = item.originalUrl
+  }, 1000)
 }
 
 function triggerDownload(url: string, filename: string): void {
@@ -653,7 +665,7 @@ function setupGalleryObserver(): void {
       void loadMoreGallery()
     }
   }, {
-    rootMargin: '180px 0px'
+    rootMargin: '40px 0px'
   })
   galleryObserver.observe(gallerySentinel.value)
 }

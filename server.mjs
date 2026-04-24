@@ -1113,7 +1113,7 @@ function mapGalleryRow(row, req) {
 
 async function listGalleryItems(req, limit, offset) {
   const pool = requireDb()
-  const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || '8'), 10) || 8, 1), 24)
+  const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || '2'), 10) || 2, 1), 12)
   const safeOffset = Math.max(Number.parseInt(String(offset || '0'), 10) || 0, 0)
   const result = await pool.query(
     `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
