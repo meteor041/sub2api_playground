@@ -837,7 +837,9 @@ function buildImageTaskPayload(
   prompt: string,
   size: string,
   sourceImages: ChatImageAttachment[] = [],
-  conversationId = currentConversationId.value
+  conversationId = currentConversationId.value,
+  source: 'chat' | 'direct' = 'direct',
+  assistantMessageId?: string
 ): ImageTaskPayload {
   const trimmedPrompt = prompt.trim()
   if (sourceImages.length > 0) {
@@ -849,6 +851,8 @@ function buildImageTaskPayload(
       n: 1,
       response_format: 'b64_json',
       conversation_id: conversationId || null,
+      source,
+      assistant_message_id: assistantMessageId || null,
       images: sourceImages.map((image) => ({
         name: image.name,
         mime_type: image.mimeType,
@@ -864,7 +868,9 @@ function buildImageTaskPayload(
     size,
     n: 1,
     response_format: 'b64_json',
-    conversation_id: conversationId || null
+    conversation_id: conversationId || null,
+    source,
+    assistant_message_id: assistantMessageId || null
   }
 }
 
@@ -1137,7 +1143,14 @@ async function handleSendChat(): Promise<void> {
     try {
       const { task_id } = await createImageTask(
         apiKey,
-        buildImageTaskPayload(toolArgs.prompt, toolArgs.size, shouldEditSourceImage ? attachments : [], originConversationId)
+        buildImageTaskPayload(
+          toolArgs.prompt,
+          toolArgs.size,
+          shouldEditSourceImage ? attachments : [],
+          originConversationId,
+          'chat',
+          assistantMessage.id
+        )
       )
       pendingTask = {
         taskId: task_id,
@@ -1168,27 +1181,7 @@ async function handleSendChat(): Promise<void> {
       if (images.length === 0) {
         throw new Error('图片生成成功，但响应中没有可展示的图片。')
       }
-      let finalMessage = `已根据提示词生成图片：${toolArgs.prompt}`
-      try {
-        const finalResponse = await sendResponsesRequest(apiKey, {
-          model: selectedTextModel.value,
-          instructions: imageToolInstructions,
-          input: [
-            ...conversationInput,
-            buildFunctionCallInput(functionCall),
-            {
-              type: 'function_call_output',
-              call_id: functionCall.call_id,
-              output: buildFunctionCallOutput(images, toolArgs.prompt, toolArgs.size)
-            }
-          ]
-        })
-        ensureResponseSucceeded(finalResponse)
-        finalMessage = extractResponseText(finalResponse) || finalMessage
-      } catch (error) {
-        setError(error instanceof Error ? `图片已处理，但模型总结失败：${error.message}` : '图片已处理，但模型总结失败')
-      }
-      await completePendingImageTask(pendingTask, task, finalMessage)
+      await completePendingImageTask(pendingTask, task)
       removePendingImageTask(task_id)
       if (!errorMessage.value) {
         setSuccess(currentConversationId.value === originConversationId
@@ -1203,7 +1196,11 @@ async function handleSendChat(): Promise<void> {
     const message = error instanceof Error ? error.message : '对话请求失败'
     if (pendingTask) {
       removePendingImageTask(pendingTask.taskId)
-      await archivePendingImageFailure(pendingTask, message)
+      if (currentConversationId.value === pendingTask.conversationId) {
+        await loadConversationById(pendingTask.conversationId)
+      } else {
+        await refreshConversationIndex()
+      }
     } else if (currentConversationId.value === originConversationId) {
       chatMessages.value = chatMessages.value.filter((message) => message.id !== assistantMessage.id)
       await persistConversationSnapshot()
@@ -1287,34 +1284,32 @@ async function archiveAssistantFailure(
 
 async function completePendingImageTask(
   pendingTask: PendingImageTask,
-  task: ImageTaskStatus,
-  finalContent?: string
+  task: ImageTaskStatus
 ): Promise<boolean> {
   if (task.status === 'failed') {
-    await archivePendingImageFailure(pendingTask, task.error || '图片生成失败')
+    if (currentConversationId.value === pendingTask.conversationId) {
+      await loadConversationById(pendingTask.conversationId)
+    } else {
+      await refreshConversationIndex()
+    }
     return false
   }
 
   const images = extractGeneratedImagesFromTask(task)
   if (images.length === 0) {
-    await archivePendingImageFailure(pendingTask, '图片生成成功，但响应中没有可展示的图片。')
+    if (currentConversationId.value === pendingTask.conversationId) {
+      await loadConversationById(pendingTask.conversationId)
+    } else {
+      await refreshConversationIndex()
+    }
     return false
   }
 
-  const payload = await getConversation(pendingTask.conversationId)
-  const nextImages = normalizeGeneratedImages([...images, ...(payload.state.generatedImages || [])])
-  const content = finalContent || (pendingTask.mode === 'edit'
-    ? `已按要求编辑图片：${pendingTask.prompt}`
-    : `已根据提示词生成图片：${pendingTask.prompt}`)
-  const assistantMessage: ChatMessage = {
-    id: pendingTask.assistantMessageId || uid('assistant-image'),
-    role: 'assistant',
-    content,
-    createdAt: Date.now(),
-    imageDataUrl: images[0].dataUrl || images[0].remoteUrl
+  if (currentConversationId.value === pendingTask.conversationId) {
+    await loadConversationById(pendingTask.conversationId)
+  } else {
+    await refreshConversationIndex()
   }
-  const nextMessages = replaceOrAppendMessage(payload.state.chatMessages || [], assistantMessage)
-  await saveConversationSnapshot(pendingTask.conversationId, nextMessages, nextImages)
   return true
 }
 
@@ -1390,7 +1385,10 @@ async function handleGenerateImage(): Promise<void> {
   imageTaskLabel.value = sourceImages.length > 0 ? '正在创建图片编辑任务...' : '正在创建生图任务...'
   let pendingTask: PendingImageTask | null = null
   try {
-    const { task_id } = await createImageTask(apiKey, buildImageTaskPayload(prompt, imageSize.value, sourceImages, originConversationId))
+    const { task_id } = await createImageTask(
+      apiKey,
+      buildImageTaskPayload(prompt, imageSize.value, sourceImages, originConversationId, 'direct')
+    )
     pendingTask = {
       taskId: task_id,
       conversationId: originConversationId,
@@ -1422,7 +1420,11 @@ async function handleGenerateImage(): Promise<void> {
   } catch (error) {
     if (pendingTask) {
       removePendingImageTask(pendingTask.taskId)
-      await archivePendingImageFailure(pendingTask, error instanceof Error ? error.message : (sourceImages.length > 0 ? '图片编辑失败' : '图片生成失败'))
+      if (currentConversationId.value === pendingTask.conversationId) {
+        await loadConversationById(pendingTask.conversationId)
+      } else {
+        await refreshConversationIndex()
+      }
     }
     setError(error instanceof Error ? error.message : (sourceImages.length > 0 ? '图片编辑失败' : '图片生成失败'))
   } finally {

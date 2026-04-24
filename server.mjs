@@ -157,6 +157,31 @@ async function ensureRuntime() {
     CREATE INDEX IF NOT EXISTS idx_playground_gallery_created
     ON playground_gallery_items (created_at DESC)
   `)
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS playground_image_tasks (
+      id UUID PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      api_key TEXT,
+      payload JSONB NOT NULL,
+      status TEXT NOT NULL,
+      error TEXT,
+      result JSONB,
+      archived BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_image_tasks_user_updated
+    ON playground_image_tasks (user_id, updated_at DESC)
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_image_tasks_status
+    ON playground_image_tasks (status, archived)
+  `)
 }
 
 function parseJsonBody(req) {
@@ -420,6 +445,8 @@ function normalizeTaskPayload(payload) {
   const n = Number.isInteger(payload?.n) && payload.n > 0 ? payload.n : 1
   const images = Array.isArray(payload?.images) ? payload.images : []
   const conversationId = typeof payload?.conversation_id === 'string' ? payload.conversation_id.trim() : ''
+  const source = payload?.source === 'chat' ? 'chat' : 'direct'
+  const assistantMessageId = typeof payload?.assistant_message_id === 'string' ? payload.assistant_message_id.trim() : ''
 
   return {
     mode,
@@ -429,7 +456,9 @@ function normalizeTaskPayload(payload) {
     response_format: responseFormat,
     n,
     images,
-    conversation_id: conversationId || null
+    conversation_id: conversationId || null,
+    source,
+    assistant_message_id: assistantMessageId || null
   }
 }
 
@@ -474,9 +503,10 @@ async function callImageUpstream(task) {
 }
 
 function buildTaskResponse(task) {
+  const status = task.status === 'completed' && !task.archived ? 'processing' : task.status
   return {
     task_id: task.id,
-    status: task.status,
+    status,
     conversation_id: task.payload.conversation_id,
     mode: task.payload.mode,
     prompt: task.payload.prompt,
@@ -484,13 +514,147 @@ function buildTaskResponse(task) {
     created_at: task.createdAt,
     updated_at: task.updatedAt,
     error: task.error || null,
-    result: task.status === 'completed' ? task.result : null
+    result: status === 'completed' ? task.result : null
   }
+}
+
+function mapTaskRow(row) {
+  return {
+    id: row.id,
+    userId: Number(row.user_id),
+    apiKey: row.api_key || '',
+    payload: row.payload,
+    status: row.status,
+    createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    updatedAt: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+    error: row.error || null,
+    result: row.result || null,
+    archived: Boolean(row.archived)
+  }
+}
+
+async function getPersistedImageTask(taskId) {
+  const pool = requireDb()
+  const result = await pool.query(
+    `SELECT id, user_id, api_key, payload, status, error, result, archived, created_at, updated_at
+     FROM playground_image_tasks
+     WHERE id = $1`,
+    [taskId]
+  )
+  return result.rows[0] ? mapTaskRow(result.rows[0]) : null
+}
+
+async function insertPersistedImageTask(task) {
+  const pool = requireDb()
+  await pool.query(
+    `INSERT INTO playground_image_tasks (id, user_id, api_key, payload, status, error, result, archived, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+    [
+      task.id,
+      task.userId,
+      task.apiKey,
+      JSON.stringify(task.payload),
+      task.status,
+      task.error,
+      task.result ? JSON.stringify(task.result) : null,
+      task.archived,
+      task.createdAt,
+      task.updatedAt
+    ]
+  )
+}
+
+async function updatePersistedImageTask(task) {
+  const pool = requireDb()
+  await pool.query(
+    `UPDATE playground_image_tasks
+     SET api_key = $2,
+         payload = $3,
+         status = $4,
+         error = $5,
+         result = $6,
+         archived = $7,
+         updated_at = $8
+     WHERE id = $1`,
+    [
+      task.id,
+      task.status === 'completed' || task.status === 'failed' ? null : task.apiKey,
+      JSON.stringify(task.payload),
+      task.status,
+      task.error,
+      task.result ? JSON.stringify(task.result) : null,
+      task.archived,
+      task.updatedAt
+    ]
+  )
+}
+
+function buildTaskImageItems(task) {
+  return (task.result?.images || [])
+    .map((image, index) => ({
+      id: `${task.id}-${image.id || index + 1}`,
+      shareKey: `${task.id}-${image.id || index + 1}`,
+      prompt: image.prompt || task.payload.prompt,
+      size: image.size || task.payload.size,
+      dataUrl: image.data_url || undefined,
+      remoteUrl: image.remote_url || undefined,
+      createdAt: Date.now()
+    }))
+    .filter((image) => image.dataUrl || image.remoteUrl)
+}
+
+function replaceOrAppendStoredMessage(messages, message) {
+  const index = messages.findIndex((item) => item.id === message.id)
+  if (index < 0) {
+    return [...messages, message]
+  }
+  const nextMessages = [...messages]
+  nextMessages.splice(index, 1, {
+    ...nextMessages[index],
+    ...message
+  })
+  return nextMessages
+}
+
+async function archiveImageTaskToConversation(task) {
+  if (task.archived || !task.payload.conversation_id) {
+    return
+  }
+
+  const conversation = await loadConversation(task.userId, task.payload.conversation_id)
+  const nextImages = task.status === 'completed'
+    ? [...buildTaskImageItems(task), ...conversation.state.generatedImages]
+    : conversation.state.generatedImages
+  const firstImage = nextImages[0] || null
+  const assistantMessageId = task.payload.assistant_message_id || `assistant-image-${task.id}`
+  const content = task.status === 'failed'
+    ? `图片任务失败：${task.error || '图片生成失败'}`
+    : (task.payload.mode === 'edit'
+      ? `已按要求编辑图片：${task.payload.prompt}`
+      : `已根据提示词生成图片：${task.payload.prompt}`)
+  const nextMessages = replaceOrAppendStoredMessage(conversation.state.chatMessages, {
+    id: assistantMessageId,
+    role: 'assistant',
+    content,
+    createdAt: Date.now(),
+    imageDataUrl: task.status === 'completed' && firstImage
+      ? firstImage.dataUrl || firstImage.remoteUrl
+      : undefined
+  })
+
+  await saveConversationState(task.userId, task.payload.conversation_id, {
+    chatMessages: nextMessages,
+    generatedImages: nextImages
+  })
+  task.archived = true
+  task.updatedAt = nowIso()
+  await updatePersistedImageTask(task)
 }
 
 async function runImageTask(task) {
   task.status = 'processing'
   task.updatedAt = nowIso()
+  await updatePersistedImageTask(task)
 
   try {
     const response = await callImageUpstream(task)
@@ -508,17 +672,27 @@ async function runImageTask(task) {
       throw appError(response.status, parseUpstreamError(data, `Image request failed: HTTP ${response.status}`))
     }
 
-    task.status = 'completed'
     task.result = normalizeImageResult(data, task.payload.prompt, task.payload.size)
+    if (!task.result.images || task.result.images.length === 0) {
+      throw new Error('图片生成成功，但响应中没有可展示的图片。')
+    }
+    task.status = 'completed'
     task.updatedAt = nowIso()
+    await archiveImageTaskToConversation(task)
   } catch (error) {
     task.status = 'failed'
     task.error = error instanceof Error ? error.message : 'Image task failed'
     task.updatedAt = nowIso()
+    try {
+      await archiveImageTaskToConversation(task)
+    } catch (archiveError) {
+      console.error(`Failed to archive failed image task ${task.id}:`, archiveError)
+    }
   }
+  await updatePersistedImageTask(task)
 }
 
-function createImageTask(body, userId) {
+async function createImageTask(body, userId) {
   const apiKey = typeof body?.api_key === 'string' ? body.api_key.trim() : ''
   const rawPayload = body?.payload && typeof body.payload === 'object' ? body.payload : null
 
@@ -553,12 +727,41 @@ function createImageTask(body, userId) {
     createdAt: nowIso(),
     updatedAt: nowIso(),
     error: null,
-    result: null
+    result: null,
+    archived: false
   }
 
   tasks.set(id, task)
+  await insertPersistedImageTask(task)
   void runImageTask(task)
   return task
+}
+
+async function resumePersistedImageTasks() {
+  if (!db) {
+    return
+  }
+  const result = await db.query(
+    `SELECT id, user_id, api_key, payload, status, error, result, archived, created_at, updated_at
+     FROM playground_image_tasks
+     WHERE status IN ('queued', 'processing')
+     ORDER BY created_at ASC`
+  )
+  for (const row of result.rows) {
+    const task = mapTaskRow(row)
+    if (!task.apiKey) {
+      task.status = 'failed'
+      task.error = '任务恢复失败：缺少 API Key'
+      task.updatedAt = nowIso()
+      await updatePersistedImageTask(task)
+      await archiveImageTaskToConversation(task)
+      continue
+    }
+    task.status = 'queued'
+    task.updatedAt = nowIso()
+    tasks.set(task.id, task)
+    void runImageTask(task)
+  }
 }
 
 function cleanupTasks() {
@@ -1039,6 +1242,7 @@ async function serveStatic(req, res) {
 
 setInterval(cleanupTasks, 5 * 60 * 1000).unref()
 await ensureRuntime()
+await resumePersistedImageTasks()
 
 const server = createServer(async (req, res) => {
   try {
@@ -1123,7 +1327,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/playground/tasks') {
       const user = await getAuthenticatedUser(req)
       const body = await parseJsonBody(req)
-      const task = createImageTask(body, user.id)
+      const task = await createImageTask(body, user.id)
       json(res, 202, {
         code: 0,
         message: 'accepted',
@@ -1138,7 +1342,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname.startsWith('/api/playground/tasks/')) {
       const user = await getAuthenticatedUser(req)
       const taskId = url.pathname.split('/').pop()
-      const task = taskId ? tasks.get(taskId) : null
+      const task = taskId ? (tasks.get(taskId) || await getPersistedImageTask(taskId)) : null
       if (!task || task.userId !== user.id) {
         throw appError(404, 'Task not found')
       }
