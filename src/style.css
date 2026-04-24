@@ -285,8 +285,7 @@ h2 {
   box-shadow: none;
 }
 
-.masonry-tile img,
-.message-images img {
+.masonry-tile img {
   width: 100%;
   display: block;
   object-fit: cover;
@@ -625,10 +624,22 @@ h2 {
 .message-image-card {
   display: grid;
   gap: 10px;
+  width: min(60%, 360px);
 }
 
 .message-images img {
+  width: 100%;
+  display: block;
+  object-fit: cover;
   border-radius: 18px;
+}
+
+.message.user .message-image-card {
+  justify-self: end;
+}
+
+.message.assistant .message-image-card {
+  justify-self: start;
 }
 
 .composer {
@@ -1075,5 +1086,9 @@ h2 {
 
   .message {
     max-width: 100%;
+  }
+
+  .message-image-card {
+    width: min(100%, 320px);
   }
 }
