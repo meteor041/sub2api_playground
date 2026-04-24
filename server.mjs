@@ -1288,8 +1288,12 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url || '/', 'http://localhost')
 
-    if (req.method === 'GET' && url.pathname === '/health') {
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
+      if (req.method === 'HEAD') {
+        res.end()
+        return
+      }
       res.end('ok\n')
       return
     }
@@ -1341,7 +1345,7 @@ const server = createServer(async (req, res) => {
       return
     }
 
-    if (req.method === 'GET' && url.pathname.startsWith('/api/playground/assets/')) {
+    if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname.startsWith('/api/playground/assets/')) {
       const token = url.pathname.split('/').pop()
       if (!token) {
         throw appError(400, 'Asset token is required')
@@ -1356,6 +1360,10 @@ const server = createServer(async (req, res) => {
         'CDN-Cache-Control': 'public, max-age=31536000, immutable',
         'Content-Type': asset.mime_type
       })
+      if (req.method === 'HEAD') {
+        res.end()
+        return
+      }
       createReadStream(filePath).pipe(res)
       return
     }
