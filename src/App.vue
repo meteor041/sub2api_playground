@@ -107,6 +107,7 @@ const galleryBusy = ref(false)
 const galleryLoadingMore = ref(false)
 const galleryHasMore = ref(true)
 const galleryNextOffset = ref(0)
+const galleryColumnCount = ref(4)
 const gallerySentinel = ref<HTMLElement | null>(null)
 let galleryObserver: IntersectionObserver | null = null
 const sharingImageKeys = ref<string[]>([])
@@ -262,20 +263,50 @@ function galleryFallbackUrl(item: GalleryItem): string {
   return item.originalUrl || item.thumbnailUrl || item.imageUrl || ''
 }
 
-function imageAspectRatio(size?: string): string | undefined {
+function parseImageSize(size?: string): { width: number, height: number } | null {
   if (!size) {
-    return undefined
+    return null
   }
   const match = size.trim().match(/^(\d+)\s*x\s*(\d+)$/i)
   if (!match) {
-    return undefined
+    return null
   }
   const width = Number.parseInt(match[1], 10)
   const height = Number.parseInt(match[2], 10)
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return null
+  }
+  return { width, height }
+}
+
+function imageAspectRatio(size?: string): string | undefined {
+  const dimensions = parseImageSize(size)
+  if (!dimensions) {
     return undefined
   }
-  return `${width} / ${height}`
+  return `${dimensions.width} / ${dimensions.height}`
+}
+
+function imageRelativeHeight(size?: string): number {
+  const dimensions = parseImageSize(size)
+  if (!dimensions) {
+    return 1
+  }
+  return dimensions.height / dimensions.width
+}
+
+function resolveGalleryColumnCount(viewportWidth: number): number {
+  if (viewportWidth <= 820) {
+    return 2
+  }
+  if (viewportWidth <= 1180) {
+    return 3
+  }
+  return 4
+}
+
+function syncGalleryColumnCount(): void {
+  galleryColumnCount.value = resolveGalleryColumnCount(window.innerWidth)
 }
 
 function buildDisplayImageSource(primary?: string, fallback?: string): DisplayImageSource | null {
@@ -320,6 +351,25 @@ function openGalleryModal(item: GalleryItem): void {
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
   handleImageError(event, galleryFallbackUrl(item))
 }
+
+const galleryColumns = computed(() => {
+  const columnCount = Math.max(galleryColumnCount.value, 1)
+  const columns = Array.from({ length: columnCount }, () => [] as GalleryItem[])
+  const columnHeights = Array.from({ length: columnCount }, () => 0)
+
+  for (const item of galleryItems.value) {
+    let targetColumnIndex = 0
+    for (let index = 1; index < columnCount; index += 1) {
+      if (columnHeights[index] < columnHeights[targetColumnIndex]) {
+        targetColumnIndex = index
+      }
+    }
+    columns[targetColumnIndex].push(item)
+    columnHeights[targetColumnIndex] += imageRelativeHeight(item.size) + 0.02
+  }
+
+  return columns
+})
 
 function triggerDownload(url: string, filename: string): void {
   const anchor = document.createElement('a')
@@ -1558,6 +1608,8 @@ async function refreshBalanceOnly(): Promise<void> {
 onMounted(async () => {
   initializeThemeMode()
   applyBranding()
+  syncGalleryColumnCount()
+  window.addEventListener('resize', syncGalleryColumnCount)
   await refreshGallery()
   setupGalleryObserver()
   if (isAuthenticated.value) {
@@ -1569,6 +1621,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   galleryObserver?.disconnect()
+  window.removeEventListener('resize', syncGalleryColumnCount)
 })
 </script>
 
@@ -1631,7 +1684,7 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <div class="gallery-masonry">
+      <div class="gallery-masonry" :style="{ '--gallery-columns': String(galleryColumnCount) }">
         <article v-if="galleryBusy" class="gallery-empty">
           正在读取公共画廊...
         </article>
@@ -1639,22 +1692,28 @@ onBeforeUnmount(() => {
           还没有公开分享的图片。登录后在创造页点击“转发”来发布第一张作品。
         </article>
         <template v-else>
-          <button
-            v-for="item in galleryItems"
-            :key="item.id"
-            class="masonry-tile"
-            type="button"
-            :style="{ aspectRatio: imageAspectRatio(item.size) || '1 / 1' }"
-            @click="openGalleryModal(item)"
+          <div
+            v-for="(column, columnIndex) in galleryColumns"
+            :key="`gallery-column-${columnIndex}`"
+            class="masonry-column"
           >
-            <img
-              :src="galleryImageUrl(item)"
-              :alt="item.prompt"
-              loading="lazy"
-              decoding="async"
-              @error="handleGalleryImageError($event, item)"
-            />
-          </button>
+            <button
+              v-for="item in column"
+              :key="item.id"
+              class="masonry-tile"
+              type="button"
+              :style="{ aspectRatio: imageAspectRatio(item.size) || '1 / 1' }"
+              @click="openGalleryModal(item)"
+            >
+              <img
+                :src="galleryImageUrl(item)"
+                :alt="item.prompt"
+                loading="lazy"
+                decoding="async"
+                @error="handleGalleryImageError($event, item)"
+              />
+            </button>
+          </div>
         </template>
       </div>
       <div ref="gallerySentinel" class="gallery-sentinel" aria-hidden="true">

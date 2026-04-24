@@ -324,11 +324,19 @@ h2 {
 }
 
 .gallery-masonry {
+  --gallery-columns: 4;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--gallery-columns), minmax(0, 1fr));
   gap: 4px;
   align-items: start;
   padding-bottom: 40px;
+}
+
+.masonry-column {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
 }
 
 .gallery-sentinel {
@@ -358,7 +366,7 @@ h2 {
   border: 0;
   border-radius: 0;
   padding: 0;
-  margin: 0 0 4px;
+  margin: 0;
   overflow: hidden;
   background: var(--tile-bg);
   box-shadow: none;
@@ -1071,10 +1079,6 @@ h2 {
     grid-template-columns: 220px minmax(0, 1fr);
   }
 
-  .gallery-masonry {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
   .creator-toolbar {
     grid-template-columns: 1fr;
   }
@@ -1184,10 +1188,6 @@ h2 {
   .direct-grid,
   .image-modal-card {
     grid-template-columns: 1fr;
-  }
-
-  .gallery-masonry {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .message {
