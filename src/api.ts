@@ -2,10 +2,12 @@ import type {
   ApiKey,
   ConversationPayload,
   ConversationSummary,
+  GalleryItem,
   Group,
   ImageTaskStatus,
   LoginResponse,
   PaginatedResponse,
+  ShareGalleryResponse,
   UserProfile
 } from './types'
 
@@ -343,6 +345,23 @@ export function createImageTask(
 
 export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
   return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export function listGalleryItems(): Promise<GalleryItem[]> {
+  return request<GalleryItem[]>('/api/playground/gallery', {}, false)
+}
+
+export function shareGalleryImage(payload: {
+  conversationId: string
+  imageId: string
+}): Promise<ShareGalleryResponse> {
+  return request<ShareGalleryResponse>('/api/playground/gallery', {
+    method: 'POST',
+    body: JSON.stringify({
+      conversation_id: payload.conversationId,
+      image_id: payload.imageId
+    })
+  })
 }
 
 export function listConversations(): Promise<ConversationSummary[]> {

@@ -119,6 +119,33 @@ async function ensureRuntime() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_playground_assets_user_hash
     ON playground_assets (user_id, sha256)
   `)
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS playground_gallery_items (
+      id UUID PRIMARY KEY,
+      asset_token UUID,
+      remote_url TEXT,
+      prompt TEXT NOT NULL,
+      size TEXT NOT NULL,
+      source_conversation_id UUID NOT NULL,
+      source_image_id TEXT NOT NULL,
+      shared_by_user_id BIGINT NOT NULL,
+      shared_by_name TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT playground_gallery_items_image_source CHECK (asset_token IS NOT NULL OR remote_url IS NOT NULL)
+    )
+  `)
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_playground_gallery_source
+    ON playground_gallery_items (shared_by_user_id, source_conversation_id, source_image_id)
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_gallery_created
+    ON playground_gallery_items (created_at DESC)
+  `)
 }
 
 function parseJsonBody(req) {
@@ -819,6 +846,84 @@ async function saveConversationState(userId, conversationId, state) {
   }
 }
 
+function mapGalleryRow(row) {
+  return {
+    id: row.id,
+    prompt: row.prompt,
+    size: row.size,
+    imageUrl: row.asset_token ? assetPublicUrl(row.asset_token) : row.remote_url,
+    sourceConversationId: row.source_conversation_id,
+    sourceImageId: row.source_image_id,
+    sharedByUserId: Number(row.shared_by_user_id),
+    sharedByName: row.shared_by_name || undefined,
+    createdAt: row.created_at
+  }
+}
+
+async function listGalleryItems() {
+  const pool = requireDb()
+  const result = await pool.query(
+    `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+            shared_by_user_id, shared_by_name, created_at
+     FROM playground_gallery_items
+     ORDER BY created_at DESC
+     LIMIT 100`
+  )
+  return result.rows.map(mapGalleryRow)
+}
+
+async function shareGalleryImage(user, body) {
+  const conversationId = typeof body?.conversation_id === 'string' ? body.conversation_id.trim() : ''
+  const imageId = typeof body?.image_id === 'string' ? body.image_id.trim() : ''
+  if (!conversationId || !imageId) {
+    throw appError(400, 'conversation_id and image_id are required')
+  }
+
+  const conversation = await loadConversation(user.id, conversationId)
+  const image = conversation.state.generatedImages.find((item) => item.id === imageId)
+  if (!image) {
+    throw appError(404, 'Generated image not found in this conversation')
+  }
+
+  const assetToken = image.assetToken || null
+  const remoteUrl = image.remoteUrl || null
+  if (!assetToken && !remoteUrl) {
+    throw appError(409, 'Image is not persisted yet; save the conversation before sharing')
+  }
+
+  const pool = requireDb()
+  const id = randomUUID()
+  const sharedByName = user.username || user.email || `User ${user.id}`
+  const result = await pool.query(
+    `INSERT INTO playground_gallery_items (
+       id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+       shared_by_user_id, shared_by_name, created_at, updated_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+     ON CONFLICT (shared_by_user_id, source_conversation_id, source_image_id)
+     DO UPDATE SET updated_at = playground_gallery_items.updated_at
+     RETURNING id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+               shared_by_user_id, shared_by_name, created_at,
+               (xmax <> 0) AS already_exists`,
+    [
+      id,
+      assetToken,
+      remoteUrl,
+      image.prompt || 'Untitled prompt',
+      image.size || 'unknown',
+      conversationId,
+      imageId,
+      user.id,
+      sharedByName
+    ]
+  )
+  const row = result.rows[0]
+  return {
+    item: mapGalleryRow(row),
+    alreadyExists: Boolean(row.already_exists)
+  }
+}
+
 async function proxyRequest(req, res) {
   const targetUrl = new URL(req.url, upstream)
   const headers = new Headers()
@@ -900,6 +1005,20 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/health') {
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' })
       res.end('ok\n')
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/playground/gallery') {
+      const items = await listGalleryItems()
+      json(res, 200, { code: 0, message: 'success', data: items })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/gallery') {
+      const user = await getAuthenticatedUser(req)
+      const body = await parseJsonBody(req)
+      const result = await shareGalleryImage(user, body)
+      json(res, result.alreadyExists ? 200 : 201, { code: 0, message: 'success', data: result })
       return
     }
 

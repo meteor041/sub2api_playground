@@ -78,6 +78,23 @@ export interface GeneratedImage {
   assetToken?: string
 }
 
+export interface GalleryItem {
+  id: string
+  prompt: string
+  size: string
+  imageUrl: string
+  sourceConversationId: string
+  sourceImageId: string
+  sharedByUserId: number
+  sharedByName?: string
+  createdAt: string
+}
+
+export interface ShareGalleryResponse {
+  item: GalleryItem
+  alreadyExists: boolean
+}
+
 export interface ImageTaskResultItem {
   id: string
   prompt: string

@@ -14,14 +14,17 @@ import {
   listAvailableGroups,
   login,
   logout,
+  listGalleryItems,
   saveConversationState,
-  sendResponsesRequest
+  sendResponsesRequest,
+  shareGalleryImage
 } from './api'
 import type {
   ApiKey,
   ChatImageAttachment,
   ChatMessage,
   ConversationSummary,
+  GalleryItem,
   GeneratedImage,
   Group,
   ImageTaskStatus,
@@ -84,12 +87,18 @@ const imageToolInstructions = [
 ].join(' ')
 
 const isAuthenticated = ref(hasAuthToken())
+const activeView = ref<'gallery' | 'create'>('gallery')
 const email = ref('')
 const password = ref('')
 const loginBusy = ref(false)
 const loadingApp = ref(false)
 const errorMessage = ref('')
 const successMessage = ref('')
+const galleryItems = ref<GalleryItem[]>([])
+const galleryBusy = ref(false)
+const galleryScroller = ref<HTMLElement | null>(null)
+const sharingImageIds = ref<string[]>([])
+const sharedImageIds = ref<string[]>([])
 
 const profile = ref<UserProfile | null>(null)
 const apiKeys = ref<ApiKey[]>([])
@@ -138,6 +147,8 @@ const balanceLabel = computed(() => {
   }
   return `$${profile.value.balance.toFixed(4)}`
 })
+
+const displayName = computed(() => profile.value?.username || profile.value?.email || '已登录用户')
 
 interface ResponseFunctionCall {
   type: 'function_call'
@@ -397,6 +408,7 @@ async function handleLogin(): Promise<void> {
 async function handleLogout(): Promise<void> {
   await logout()
   isAuthenticated.value = false
+  activeView.value = 'gallery'
   profile.value = null
   apiKeys.value = []
   groups.value = []
@@ -423,6 +435,70 @@ async function handleCreateApiKey(): Promise<void> {
     selectedApiKeyId.value = key.id
   } catch (error) {
     setError(error instanceof Error ? error.message : '创建 API Key 失败')
+  }
+}
+
+async function refreshGallery(): Promise<void> {
+  galleryBusy.value = true
+  try {
+    galleryItems.value = await listGalleryItems()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '加载公共画廊失败')
+  } finally {
+    galleryBusy.value = false
+  }
+}
+
+function scrollGallery(direction: 'left' | 'right'): void {
+  const scroller = galleryScroller.value
+  if (!scroller) {
+    return
+  }
+  scroller.scrollBy({
+    left: direction === 'left' ? -scroller.clientWidth * 0.82 : scroller.clientWidth * 0.82,
+    behavior: 'smooth'
+  })
+}
+
+function isImageShared(image: GeneratedImage): boolean {
+  return sharedImageIds.value.includes(image.id)
+}
+
+function isImageSharing(image: GeneratedImage): boolean {
+  return sharingImageIds.value.includes(image.id)
+}
+
+async function handleShareImage(image: GeneratedImage): Promise<void> {
+  if (!isAuthenticated.value) {
+    activeView.value = 'create'
+    setError('请先登录后再转发图片到公共画廊。')
+    return
+  }
+  if (!currentConversationId.value) {
+    setError('请先选择或创建一个会话。')
+    return
+  }
+  if (isImageSharing(image) || isImageShared(image)) {
+    return
+  }
+
+  sharingImageIds.value = [...sharingImageIds.value, image.id]
+  try {
+    await persistConversationSnapshot()
+    const result = await shareGalleryImage({
+      conversationId: currentConversationId.value,
+      imageId: image.id
+    })
+    sharedImageIds.value = [...new Set([...sharedImageIds.value, image.id])]
+    galleryItems.value = [
+      result.item,
+      ...galleryItems.value.filter((item) => item.id !== result.item.id)
+    ]
+    setSuccess(result.alreadyExists ? '这张图片已经在公共画廊中。' : '已转发到公共画廊。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '转发到公共画廊失败')
+  } finally {
+    sharingImageIds.value = sharingImageIds.value.filter((id) => id !== image.id)
   }
 }
 
@@ -964,8 +1040,8 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
 
 function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[] {
   return (task.result?.images || [])
-    .map((item) => ({
-      id: item.id || uid('image'),
+    .map((item, index) => ({
+      id: `${task.task_id}-${item.id || index + 1}`,
       prompt: item.prompt,
       size: item.size,
       dataUrl: item.data_url || undefined,
@@ -1041,6 +1117,7 @@ async function refreshBalanceOnly(): Promise<void> {
 
 onMounted(async () => {
   applyBranding()
+  await refreshGallery()
   if (isAuthenticated.value) {
     await refreshWorkspace()
     await ensureConversationLoaded()
@@ -1049,96 +1126,162 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="shell">
-    <section class="hero">
-      <div>
-        <div class="hero-brand">
-          <img class="hero-logo" :src="logoUrl" alt="Sub2API logo" />
-          <p class="eyebrow">Sub2API Parallel Lab</p>
-        </div>
-        <h1>对话和生图 Playground</h1>
-        <p class="hero-copy">
-          独立端口运行，复用 sub2api 的用户、余额、API Key、调度和扣费链路。
-        </p>
-      </div>
-      <div class="status-card">
-        <span>当前余额</span>
-        <strong>{{ balanceLabel }}</strong>
-        <small v-if="profile">{{ profile.email }}</small>
-        <small v-else>未登录</small>
-      </div>
-    </section>
-
-    <section v-if="!isAuthenticated" class="login-card panel">
-      <div>
-        <p class="eyebrow">Step 1</p>
-        <h2>登录 sub2api 账号</h2>
-        <p>使用现有账号登录后，Playground 会读取余额和可用 OpenAI 分组 API Key。</p>
-      </div>
-      <form class="login-form" @submit.prevent="handleLogin">
-        <label>
-          邮箱
-          <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
-        </label>
-        <label>
-          密码
-          <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
-        </label>
-        <button :disabled="loginBusy" type="submit">
-          {{ loginBusy ? '登录中...' : '进入 Playground' }}
-        </button>
-      </form>
-    </section>
-
-    <template v-else>
-      <section class="toolbar panel">
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <img class="brand-logo" :src="logoUrl" alt="Sub2API logo" />
         <div>
-          <p class="eyebrow">Step 2</p>
-          <h2>选择 OpenAI API Key</h2>
-          <p>文字对话和图片生成都会通过这个 Key 进入现有网关并扣费。</p>
+          <strong>Image Lab</strong>
+          <span>Sub2API</span>
         </div>
-        <div class="toolbar-actions">
-          <select v-model="currentConversationId" :disabled="conversationBusy || conversations.length === 0" @change="handleConversationSelect">
-            <option v-for="conversation in conversations" :key="conversation.id" :value="conversation.id">
-              {{ conversation.title }}
-            </option>
-          </select>
-          <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
-            <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
-              {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
-            </option>
-          </select>
-          <button class="secondary" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
-            新建会话
-          </button>
-          <button class="secondary" type="button" :disabled="loadingApp" @click="refreshWorkspace">
-            {{ loadingApp ? '刷新中...' : '刷新' }}
-          </button>
-          <button v-if="openAiApiKeys.length === 0" type="button" @click="handleCreateApiKey">
-            创建 Playground Key
-          </button>
-          <button class="ghost" type="button" @click="handleLogout">退出</button>
-        </div>
-      </section>
+      </div>
 
-      <section class="workspace">
-        <div class="chat panel">
+      <nav class="side-nav" aria-label="Primary">
+        <button :class="{ active: activeView === 'gallery' }" type="button" @click="activeView = 'gallery'">
+          <span>画廊</span>
+          <small>Public gallery</small>
+        </button>
+        <button :class="{ active: activeView === 'create' }" type="button" @click="activeView = 'create'">
+          <span>创造</span>
+          <small>Chat & create</small>
+        </button>
+      </nav>
+
+      <div class="sidebar-account">
+        <template v-if="isAuthenticated">
+          <span>已登录</span>
+          <strong>{{ displayName }}</strong>
+          <small>{{ balanceLabel }}</small>
+          <button class="ghost mini" type="button" @click="handleLogout">退出</button>
+        </template>
+        <template v-else>
+          <span>游客模式</span>
+          <strong>公共画廊可浏览</strong>
+          <button class="primary mini" type="button" @click="activeView = 'create'">登录创造</button>
+        </template>
+      </div>
+    </aside>
+
+    <section v-if="activeView === 'gallery'" class="page gallery-page">
+      <header class="page-header">
+        <div>
+          <p class="eyebrow">Public Gallery</p>
+          <h1>共享灵感画廊</h1>
+          <p>这里展示所有用户转发的生成图片，游客也可以浏览。</p>
+        </div>
+        <button class="ghost" type="button" :disabled="galleryBusy" @click="refreshGallery">
+          {{ galleryBusy ? '刷新中...' : '刷新画廊' }}
+        </button>
+      </header>
+
+      <div class="gallery-stage">
+        <button class="gallery-arrow left" type="button" aria-label="向左浏览" @click="scrollGallery('left')">‹</button>
+        <div ref="galleryScroller" class="gallery-strip">
+          <article v-if="galleryBusy" class="glass-card gallery-empty">
+            正在读取公共画廊...
+          </article>
+          <article v-else-if="galleryItems.length === 0" class="glass-card gallery-empty">
+            还没有公开分享的图片。登录后在创造页点击“转发”来发布第一张作品。
+          </article>
+          <article v-for="item in galleryItems" :key="item.id" class="glass-card public-card">
+            <img :src="item.imageUrl" :alt="item.prompt" />
+            <div class="public-card-body">
+              <p>{{ item.prompt }}</p>
+              <div>
+                <span>{{ item.size }}</span>
+                <span>{{ item.sharedByName || '匿名用户' }}</span>
+              </div>
+            </div>
+          </article>
+        </div>
+        <button class="gallery-arrow right" type="button" aria-label="向右浏览" @click="scrollGallery('right')">›</button>
+      </div>
+    </section>
+
+    <section v-else class="page create-page">
+      <template v-if="!isAuthenticated">
+        <section class="login-card panel">
+          <div>
+            <p class="eyebrow">Sign in</p>
+            <h1>登录后开始创造</h1>
+            <p>使用现有 sub2api 账号登录后，Playground 会读取余额和 OpenAI 分组 API Key。</p>
+          </div>
+          <form class="login-form" @submit.prevent="handleLogin">
+            <label>
+              邮箱
+              <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              密码
+              <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+            </label>
+            <button :disabled="loginBusy" type="submit">
+              {{ loginBusy ? '登录中...' : '进入创造页' }}
+            </button>
+          </form>
+        </section>
+      </template>
+
+      <section v-else class="creator-grid">
+        <aside class="sessions panel">
+          <div class="panel-header compact">
+            <div>
+              <p class="eyebrow">Sessions</p>
+              <h2>对话</h2>
+            </div>
+            <button class="mini" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
+              新建
+            </button>
+          </div>
+
+          <div class="session-list">
+            <button
+              v-for="conversation in conversations"
+              :key="conversation.id"
+              class="session-item"
+              :class="{ active: conversation.id === currentConversationId }"
+              type="button"
+              :disabled="conversationBusy"
+              @click="currentConversationId = conversation.id; handleConversationSelect()"
+            >
+              <strong>{{ conversation.title }}</strong>
+              <span>{{ conversation.lastMessageAt || conversation.updatedAt }}</span>
+            </button>
+            <p v-if="conversations.length === 0" class="empty">暂无会话。</p>
+          </div>
+        </aside>
+
+        <section class="chat panel">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Step 3</p>
-              <h2>文字模型对话</h2>
+              <p class="eyebrow">Create</p>
+              <h2>对话空间</h2>
             </div>
-            <select v-model="selectedTextModel">
-              <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
-            </select>
+            <div class="top-controls">
+              <select v-model="selectedTextModel">
+                <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+              <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
+                <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
+                  {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
+                </option>
+              </select>
+              <button class="ghost mini" type="button" :disabled="loadingApp" @click="refreshWorkspace">
+                {{ loadingApp ? '刷新中...' : '刷新' }}
+              </button>
+              <button v-if="openAiApiKeys.length === 0" class="mini" type="button" @click="handleCreateApiKey">
+                创建 Key
+              </button>
+            </div>
           </div>
 
           <div class="messages">
             <article v-if="conversationBusy" class="empty">
               正在加载会话...
             </article>
-            <article v-else-if="chatMessages.length === 0" class="empty">
-              先试一句：“帮我构思一张电影海报的提示词”。
+            <article v-else-if="chatMessages.length === 0" class="empty hero-empty">
+              <strong>像使用 Codex 一样描述你想创造的画面。</strong>
+              <span>可以输入提示词、粘贴截图，或让文字模型自动调用生图工具。</span>
             </article>
             <article
               v-for="message in chatMessages"
@@ -1194,27 +1337,27 @@ onMounted(async () => {
               <textarea
                 v-model="chatInput"
                 rows="4"
-                placeholder="输入文字对话内容；支持粘贴图片或点击“添加图片”。当你明确要求画图时，文字模型会自动调用生图工具。"
+                placeholder="输入文字对话内容；明确要求画图时，模型会自动调用生图工具。"
                 @paste="handleComposerPaste"
               />
               <div class="composer-tools">
                 <button class="secondary" type="button" :disabled="chatBusy" @click="openComposerFilePicker">
                   添加图片
                 </button>
-                <span class="composer-hint">支持复制截图后直接粘贴，或选择本地图片一起发送。</span>
+                <span class="composer-hint">支持复制截图后直接粘贴。</span>
               </div>
             </div>
             <button :disabled="chatBusy || !selectedKeySecret" type="submit">
-              {{ chatBusy ? '发送中...' : '发送对话' }}
+              {{ chatBusy ? '发送中...' : '发送' }}
             </button>
           </form>
-        </div>
+        </section>
 
         <aside class="image panel">
           <div class="panel-header">
             <div>
-              <p class="eyebrow">Step 4</p>
-              <h2>手动生图</h2>
+              <p class="eyebrow">Images</p>
+              <h2>当前图片</h2>
             </div>
             <span class="pill">{{ imageModel }}</span>
           </div>
@@ -1244,24 +1387,24 @@ onMounted(async () => {
                 :disabled="imageBusy"
                 @click="clearManualImageSource"
               >
-                清除原图
+                清除
               </button>
             </div>
             <article v-if="imageSource" class="composer-preview">
               <img :src="imageSource.dataUrl" :alt="imageSource.name" />
               <div class="composer-preview-meta">
                 <span>{{ imageSource.name }}</span>
-                <span>已上传原图，提交后会进入图片编辑模式。</span>
+                <span>编辑模式</span>
               </div>
             </article>
             <label>
               {{ imageSource ? '编辑指令' : '提示词' }}
               <textarea
                 v-model="imagePrompt"
-                rows="7"
+                rows="5"
                 :placeholder="imageSource
-                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道，并提升整体电影感'
-                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒、强烈构图'"
+                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道'
+                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒'"
               />
             </label>
             <button :disabled="imageBusy || !selectedKeySecret" type="submit">
@@ -1269,25 +1412,38 @@ onMounted(async () => {
             </button>
           </form>
 
-          <div class="gallery">
+          <div class="gallery local-gallery">
             <article v-for="image in generatedImages" :key="image.id" class="image-card">
               <img v-if="image.dataUrl || image.remoteUrl" :src="image.dataUrl || image.remoteUrl" :alt="image.prompt" />
               <p>{{ image.prompt }}</p>
               <div class="image-card-footer">
                 <span>{{ image.size }}</span>
-                <button
-                  class="ghost mini"
-                  type="button"
-                  @click="downloadImage(image.dataUrl || image.remoteUrl || '', image.prompt)"
-                >
-                  下载图片
-                </button>
+                <div class="image-actions">
+                  <button
+                    class="ghost mini"
+                    type="button"
+                    @click="downloadImage(image.dataUrl || image.remoteUrl || '', image.prompt)"
+                  >
+                    下载
+                  </button>
+                  <button
+                    class="mini"
+                    type="button"
+                    :disabled="isImageSharing(image) || isImageShared(image)"
+                    @click="handleShareImage(image)"
+                  >
+                    {{ isImageShared(image) ? '已转发' : (isImageSharing(image) ? '转发中...' : '转发') }}
+                  </button>
+                </div>
               </div>
             </article>
+            <p v-if="generatedImages.length === 0" class="empty">
+              当前会话还没有生成图片。
+            </p>
           </div>
         </aside>
       </section>
-    </template>
+    </section>
 
     <p v-if="errorMessage" class="toast error">{{ errorMessage }}</p>
     <p v-if="successMessage" class="toast success">{{ successMessage }}</p>
