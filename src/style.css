@@ -295,6 +295,44 @@ h2 {
   margin-bottom: 30px;
 }
 
+.gallery-toolbar {
+  justify-content: flex-end;
+  margin-bottom: 18px;
+}
+
+.gallery-refresh-button {
+  display: inline-grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  padding: 0;
+  border-radius: 999px;
+}
+
+.gallery-refresh-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.gallery-refresh-button svg.spinning {
+  animation: gallery-refresh-spin 900ms linear infinite;
+}
+
+@keyframes gallery-refresh-spin {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .page-header p:not(.eyebrow),
 .login-card p {
   max-width: 620px;

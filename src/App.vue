@@ -1781,9 +1781,18 @@ onBeforeUnmount(() => {
     </aside>
 
     <section v-if="activeView === 'gallery'" class="page gallery-page">
-      <header class="page-header">
-        <button class="ghost" type="button" :disabled="galleryBusy" @click="refreshGallery">
-          {{ galleryBusy ? '刷新中...' : '刷新画廊' }}
+      <header class="page-header gallery-toolbar">
+        <button
+          class="ghost gallery-refresh-button"
+          type="button"
+          :disabled="galleryBusy"
+          :aria-label="galleryBusy ? '刷新中' : '刷新画廊'"
+          :title="galleryBusy ? '刷新中' : '刷新画廊'"
+          @click="refreshGallery"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spinning: galleryBusy }">
+            <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" />
+          </svg>
         </button>
       </header>
 
