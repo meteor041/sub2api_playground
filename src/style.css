@@ -1113,6 +1113,7 @@ h2 {
   align-content: start;
   gap: 14px;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
   padding: 16px 10px 12px 6px;
 }
@@ -1131,6 +1132,37 @@ h2 {
 }
 
 .modal-copy small {
+  color: var(--muted);
+}
+
+.standalone-modal-copy {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.standalone-copy-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 8px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.standalone-copy-text,
+.standalone-copy-description {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.72;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.standalone-copy-text {
+  font-size: 1rem;
+  font-weight: 400;
+}
+
+.standalone-copy-description {
   color: var(--muted);
 }
 

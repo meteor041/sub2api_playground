@@ -232,6 +232,7 @@ interface StandalonePreviewImage {
   name: string
   description?: string
   mimeType?: string
+  eyebrow?: string
 }
 
 function uid(prefix: string): string {
@@ -2007,7 +2008,8 @@ onBeforeUnmount(() => {
                       fallbackSrc: image.fallbackSrc,
                       downloadSrc: image.downloadSrc,
                       name: message.content || `${message.role}-image-${index + 1}`,
-                      description: '消息中的图片预览。'
+                      description: '消息中的图片预览。',
+                      eyebrow: 'Message'
                     })"
                   >
                     <img
@@ -2051,7 +2053,8 @@ onBeforeUnmount(() => {
                       downloadSrc: image.dataUrl,
                       name: image.name,
                       description: '这张图片会作为当前对话的输入附件随消息一起发送。',
-                      mimeType: image.mimeType
+                      mimeType: image.mimeType,
+                      eyebrow: 'Attachment'
                     })"
                   >
                     <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
@@ -2360,11 +2363,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <div class="modal-copy">
-          <p class="eyebrow">Attachment</p>
-          <h2>{{ selectedStandaloneImage.name }}</h2>
-          <div class="modal-prompt-scroll">
-            <p>{{ selectedStandaloneImage.description || '图片预览。' }}</p>
+        <div class="modal-copy standalone-modal-copy">
+          <p class="eyebrow">{{ selectedStandaloneImage.eyebrow || 'Attachment' }}</p>
+          <div class="standalone-copy-scroll">
+            <p class="standalone-copy-text">{{ selectedStandaloneImage.name }}</p>
+            <p v-if="selectedStandaloneImage.description" class="standalone-copy-description">
+              {{ selectedStandaloneImage.description }}
+            </p>
           </div>
           <small>{{ selectedStandaloneImage.mimeType || 'image/*' }}</small>
         </div>
