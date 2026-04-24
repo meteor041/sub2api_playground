@@ -753,6 +753,16 @@ h2 {
   width: min(60%, 360px);
 }
 
+.message-image-preview {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  cursor: zoom-in;
+}
+
 .message-images img {
   width: 100%;
   display: block;
@@ -1222,17 +1232,15 @@ h2 {
   .creator-grid,
   .creator-grid.sessions-is-collapsed {
     grid-template-columns: 1fr;
-    height: calc(100vh - 178px);
+    height: auto;
   }
 
   .sessions {
-    position: fixed;
-    top: 18px;
-    left: 18px;
-    bottom: 18px;
-    z-index: 13;
-    width: min(320px, calc(100vw - 36px));
-    transform: translateX(0);
+    position: static;
+    order: 2;
+    width: auto;
+    max-height: none;
+    transform: none;
   }
 
   .sessions.collapsed {
@@ -1241,6 +1249,25 @@ h2 {
     width: 66px;
     height: auto;
     transform: none;
+  }
+
+  .chat {
+    order: 1;
+  }
+
+  .image-drawer.mobile-inline {
+    position: static;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    order: 3;
+    width: auto;
+    margin-top: 12px;
+  }
+
+  .session-list {
+    max-height: none;
   }
 
   .page-header,
@@ -1300,6 +1327,6 @@ h2 {
   }
 
   .message-image-card {
-    width: min(100%, 320px);
+    width: min(100%, 360px);
   }
 }

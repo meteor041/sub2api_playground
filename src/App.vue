@@ -118,6 +118,7 @@ const galleryLoadingMore = ref(false)
 const galleryHasMore = ref(true)
 const galleryNextOffset = ref(0)
 const galleryColumnCount = ref(4)
+const isMobileViewport = ref(false)
 const gallerySentinel = ref<HTMLElement | null>(null)
 let galleryObserver: IntersectionObserver | null = null
 const sharingImageKeys = ref<string[]>([])
@@ -146,7 +147,7 @@ const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
 const selectedImageKey = ref('')
 const selectedGalleryItem = ref<GalleryItem | null>(null)
-const selectedComposerImage = ref<ChatImageAttachment | null>(null)
+const selectedStandaloneImage = ref<StandalonePreviewImage | null>(null)
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
 
@@ -222,6 +223,15 @@ interface DisplayImageSource {
   src: string
   fallbackSrc: string
   downloadSrc: string
+}
+
+interface StandalonePreviewImage {
+  src: string
+  fallbackSrc: string
+  downloadSrc: string
+  name: string
+  description?: string
+  mimeType?: string
 }
 
 function uid(prefix: string): string {
@@ -396,8 +406,14 @@ function resolveGalleryColumnCount(viewportWidth: number): number {
   return 4
 }
 
-function syncGalleryColumnCount(): void {
-  galleryColumnCount.value = resolveGalleryColumnCount(window.innerWidth)
+function syncViewportLayout(): void {
+  const viewportWidth = window.innerWidth
+  galleryColumnCount.value = resolveGalleryColumnCount(viewportWidth)
+  isMobileViewport.value = viewportWidth <= 820
+  if (isMobileViewport.value) {
+    imagesPanelOpen.value = true
+    sessionsCollapsed.value = false
+  }
 }
 
 function buildDisplayImageSource(primary?: string, fallback?: string, width = conversationPreviewWidth): DisplayImageSource | null {
@@ -428,23 +444,23 @@ function handleGeneratedImageError(event: Event, image: GeneratedImage): void {
 function closeImageModal(): void {
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
-  selectedComposerImage.value = null
+  selectedStandaloneImage.value = null
 }
 
 function openImageModal(image: GeneratedImage, index: number): void {
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
-  selectedComposerImage.value = null
+  selectedStandaloneImage.value = null
 }
 
 function openGalleryModal(item: GalleryItem): void {
   selectedGalleryItem.value = item
   selectedImageKey.value = ''
-  selectedComposerImage.value = null
+  selectedStandaloneImage.value = null
 }
 
-function openComposerImageModal(image: ChatImageAttachment): void {
-  selectedComposerImage.value = image
+function openStandaloneImageModal(image: StandalonePreviewImage): void {
+  selectedStandaloneImage.value = image
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
 }
@@ -1716,8 +1732,8 @@ async function refreshBalanceOnly(): Promise<void> {
 onMounted(async () => {
   initializeThemeMode()
   applyBranding()
-  syncGalleryColumnCount()
-  window.addEventListener('resize', syncGalleryColumnCount)
+  syncViewportLayout()
+  window.addEventListener('resize', syncViewportLayout)
   await refreshGallery()
   setupGalleryObserver()
   if (isAuthenticated.value) {
@@ -1729,7 +1745,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   galleryObserver?.disconnect()
-  window.removeEventListener('resize', syncGalleryColumnCount)
+  window.removeEventListener('resize', syncViewportLayout)
 })
 </script>
 
@@ -1858,9 +1874,9 @@ onBeforeUnmount(() => {
         </section>
       </template>
 
-      <section v-else class="creator-grid" :class="{ 'sessions-is-collapsed': sessionsCollapsed }">
-        <aside class="sessions panel" :class="{ collapsed: sessionsCollapsed }">
-          <template v-if="sessionsCollapsed">
+      <section v-else class="creator-grid" :class="{ 'sessions-is-collapsed': sessionsCollapsed && !isMobileViewport }">
+        <aside class="sessions panel" :class="{ collapsed: sessionsCollapsed && !isMobileViewport }">
+          <template v-if="sessionsCollapsed && !isMobileViewport">
             <button
               class="session-rail-button"
               type="button"
@@ -1982,12 +1998,25 @@ onBeforeUnmount(() => {
                   :key="`${image.src}-${index}`"
                   class="message-image-card"
                 >
-                  <img
-                    :src="image.src"
-                    :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
-                    loading="lazy"
-                    @error="handleImageError($event, image.fallbackSrc)"
-                  />
+                  <button
+                    class="message-image-preview"
+                    type="button"
+                    :aria-label="`查看图片 ${index + 1}`"
+                    @click="openStandaloneImageModal({
+                      src: image.downloadSrc,
+                      fallbackSrc: image.fallbackSrc,
+                      downloadSrc: image.downloadSrc,
+                      name: message.content || `${message.role}-image-${index + 1}`,
+                      description: '消息中的图片预览。'
+                    })"
+                  >
+                    <img
+                      :src="image.src"
+                      :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
+                      loading="lazy"
+                      @error="handleImageError($event, image.fallbackSrc)"
+                    />
+                  </button>
                   <button
                     class="ghost mini"
                     type="button"
@@ -2016,7 +2045,14 @@ onBeforeUnmount(() => {
                     class="composer-attachment-button"
                     type="button"
                     :aria-label="`查看图片 ${image.name}`"
-                    @click="openComposerImageModal(image)"
+                    @click="openStandaloneImageModal({
+                      src: image.dataUrl,
+                      fallbackSrc: image.dataUrl,
+                      downloadSrc: image.dataUrl,
+                      name: image.name,
+                      description: '这张图片会作为当前对话的输入附件随消息一起发送。',
+                      mimeType: image.mimeType
+                    })"
                   >
                     <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
                   </button>
@@ -2128,9 +2164,10 @@ onBeforeUnmount(() => {
         </section>
 
         <button
+          v-if="!isMobileViewport"
           class="images-fab"
           type="button"
-          :aria-expanded="imagesPanelOpen"
+          :aria-expanded="isMobileViewport ? true : imagesPanelOpen"
           aria-controls="session-images-panel"
           @click="imagesPanelOpen = true"
         >
@@ -2139,18 +2176,19 @@ onBeforeUnmount(() => {
         </button>
 
         <div
-          v-if="imagesPanelOpen"
+          v-if="imagesPanelOpen && !isMobileViewport"
           class="image-panel-scrim"
           aria-hidden="true"
           @click="imagesPanelOpen = false"
         ></div>
 
         <aside
-          v-if="imagesPanelOpen"
+          v-if="imagesPanelOpen || isMobileViewport"
           id="session-images-panel"
           class="image panel image-drawer"
-          role="dialog"
-          aria-modal="true"
+          :class="{ 'mobile-inline': isMobileViewport }"
+          :role="isMobileViewport ? undefined : 'dialog'"
+          :aria-modal="isMobileViewport ? undefined : 'true'"
           aria-label="当前会话图片"
         >
           <div class="panel-header">
@@ -2160,7 +2198,13 @@ onBeforeUnmount(() => {
             </div>
             <div class="image-drawer-actions">
               <span class="pill">{{ imageModel }}</span>
-              <button class="ghost mini" type="button" aria-label="关闭图片栏" @click="imagesPanelOpen = false">
+              <button
+                v-if="!isMobileViewport"
+                class="ghost mini"
+                type="button"
+                aria-label="关闭图片栏"
+                @click="imagesPanelOpen = false"
+              >
                 关闭
               </button>
             </div>
@@ -2287,7 +2331,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div
-      v-if="selectedComposerImage"
+      v-if="selectedStandaloneImage"
       class="image-modal"
       role="dialog"
       aria-modal="true"
@@ -2298,16 +2342,17 @@ onBeforeUnmount(() => {
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-wrap">
           <img
-            :src="selectedComposerImage.dataUrl"
-            :alt="selectedComposerImage.name"
+            :src="selectedStandaloneImage.src"
+            :alt="selectedStandaloneImage.name"
             loading="lazy"
+            @error="handleImageError($event, selectedStandaloneImage.fallbackSrc)"
           />
           <div class="modal-actions">
             <button
               class="icon-button"
               type="button"
               aria-label="下载图片"
-              @click="downloadImage(selectedComposerImage.dataUrl, selectedComposerImage.name || 'uploaded-image')"
+              @click="downloadImage(selectedStandaloneImage.downloadSrc, selectedStandaloneImage.name || 'uploaded-image')"
             >
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
@@ -2316,12 +2361,12 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div class="modal-copy">
-          <p class="eyebrow">Upload</p>
-          <h2>{{ selectedComposerImage.name }}</h2>
+          <p class="eyebrow">Attachment</p>
+          <h2>{{ selectedStandaloneImage.name }}</h2>
           <div class="modal-prompt-scroll">
-            <p>这张图片会作为当前对话的输入附件随消息一起发送。</p>
+            <p>{{ selectedStandaloneImage.description || '图片预览。' }}</p>
           </div>
-          <small>{{ selectedComposerImage.mimeType }}</small>
+          <small>{{ selectedStandaloneImage.mimeType || 'image/*' }}</small>
         </div>
       </article>
     </div>
