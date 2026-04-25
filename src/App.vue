@@ -1148,10 +1148,11 @@ function mergeStreamingTaskImages(task: ImageTaskStatus): void {
     return
   }
 
-  const imageIds = new Set(images.map((image) => image.id))
+  const latestImage = images[images.length - 1]
+  const taskImagePrefix = `${task.task_id}-`
   generatedImages.value = normalizeGeneratedImages([
-    ...images,
-    ...generatedImages.value.filter((image) => !imageIds.has(image.id))
+    latestImage,
+    ...generatedImages.value.filter((image) => !image.id.startsWith(taskImagePrefix))
   ])
 }
 

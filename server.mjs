@@ -366,16 +366,13 @@ function base64ImageDataUrl(value, outputFormat = 'png') {
   return `data:${imageMimeType(outputFormat)};base64,${raw}`
 }
 
-function createStreamImageItem(task, fields, fallbackIndex = 0) {
+function createStreamImageItem(task, fields) {
   const b64 = typeof fields?.b64_json === 'string'
     ? fields.b64_json
     : (typeof fields?.partial_image_b64 === 'string' ? fields.partial_image_b64 : '')
   const result = typeof fields?.result === 'string' ? fields.result : ''
   const rawUrl = typeof fields?.url === 'string' ? fields.url.trim() : ''
   const outputFormat = typeof fields?.output_format === 'string' ? fields.output_format : 'png'
-  const index = Number.isInteger(fields?.index)
-    ? fields.index
-    : (Number.isInteger(fields?.partial_image_index) ? fields.partial_image_index : fallbackIndex)
   const dataUrl = base64ImageDataUrl(b64 || result, outputFormat) || (rawUrl.startsWith('data:') ? rawUrl : null)
   const remoteUrl = rawUrl && !rawUrl.startsWith('data:') ? rawUrl : ''
 
@@ -384,7 +381,7 @@ function createStreamImageItem(task, fields, fallbackIndex = 0) {
   }
 
   return {
-    id: `image-${index + 1}`,
+    id: 'image-1',
     prompt: typeof fields?.revised_prompt === 'string' && fields.revised_prompt.trim()
       ? fields.revised_prompt.trim()
       : task.payload.prompt,
@@ -428,7 +425,7 @@ function collectStreamImageItems(event, task) {
     : (Array.isArray(event.output) ? event.output : [])
   return output
     .map((item, index) => item?.type === 'image_generation_call'
-      ? createStreamImageItem(task, { ...item, index }, index)
+      ? createStreamImageItem(task, { ...item, index })
       : null)
     .filter(Boolean)
 }
@@ -459,13 +456,12 @@ function mergeTaskStreamImages(task, images, rawEvents) {
   if (!images.length) {
     return false
   }
-  const existing = Array.isArray(task.result?.images) ? task.result.images : []
-  const byId = new Map(existing.map((image, index) => [image.id || `image-${index + 1}`, image]))
-  for (const image of images) {
-    byId.set(image.id, image)
+  const latest = {
+    ...images[images.length - 1],
+    id: 'image-1'
   }
   task.result = {
-    images: Array.from(byId.values()),
+    images: [latest],
     raw: {
       stream: true,
       events: rawEvents.slice(-20)
