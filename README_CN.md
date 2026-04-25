@@ -33,6 +33,16 @@ npm run dev
 前端开发服务器默认监听 `5174` 端口。
 本地任务 / 代理服务默认监听 `8081` 端口。
 
+## MOCK 测试环境
+
+如果只想测试前端流程，不连接真实 `sub2api`、PostgreSQL 或 R2，可以启动内置 MOCK 环境：
+
+```bash
+npm run dev:mock
+```
+
+MOCK 环境会在 Vite 开发服务器内模拟登录、用户资料、OpenAI 分组、API Key、会话、公共画廊、文字响应和异步生图任务。登录表单可以填写任意邮箱和密码；返回的图片是本地生成的 SVG 占位图，不会调用真实模型，也不会产生真实扣费。MOCK 数据保存在当前 dev server 的内存里，重启 `npm run dev:mock` 后会重置。
+
 默认情况下，Vite 会按下面的规则做代理：
 
 - `/api/playground` -> `http://localhost:8081`

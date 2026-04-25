@@ -33,6 +33,16 @@ npm run dev
 The frontend dev server listens on port `5174`.
 The local task/proxy server listens on port `8081`.
 
+## Mock Test Environment
+
+To test the frontend without a real `sub2api` backend, PostgreSQL, or R2, start the built-in mock environment:
+
+```bash
+npm run dev:mock
+```
+
+The mock environment runs inside the Vite dev server and simulates login, profile, OpenAI groups, API keys, conversations, public gallery, text responses, and async image tasks. The login form accepts any email and password. Generated images are local SVG placeholders, so no real model is called and no real billing happens. Mock data is kept in the current dev server memory and resets when `npm run dev:mock` restarts.
+
 By default, Vite proxies these paths:
 
 - `/api/playground` -> `http://localhost:8081`
