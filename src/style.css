@@ -539,22 +539,25 @@ h2 {
 .composer-main,
 .session-list {
   display: grid;
-  gap: 14px;
+  gap: 4px;
 }
 
 .create-page {
   display: flex;
   flex-direction: column;
   padding: 14px 18px;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .creator-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-rows: minmax(0, 1fr);
   gap: 12px;
   flex: 1;
   min-height: 0;
-  height: calc(100vh - 28px);
+  overflow: hidden;
 }
 
 .creator-layout.work-sidebar-hidden {
@@ -680,6 +683,74 @@ h2 {
   gap: 8px;
 }
 
+.canvas-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.52);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.24);
+  outline: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(10px);
+  border-radius: 999px;
+  opacity: 0;
+  transition: opacity 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.canvas-nav-btn:hover:not(:disabled) {
+  background: rgba(15, 23, 42, 0.76);
+  transform: translateY(-50%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.32);
+}
+
+.canvas-nav-prev {
+  left: 14px;
+}
+
+.canvas-nav-next {
+  right: 14px;
+}
+
+.canvas-nav-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.canvas-image-display:hover .canvas-nav-btn {
+  opacity: 1;
+}
+
+.canvas-image-counter {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(15, 23, 42, 0.52);
+  backdrop-filter: blur(10px);
+  font-size: 0.78rem;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.canvas-image-display:hover .canvas-image-counter {
+  opacity: 1;
+}
+
 .canvas-empty {
   display: grid;
   gap: 10px;
@@ -799,6 +870,16 @@ h2 {
 .work-tab-content {
   min-height: 0;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.sessions-content,
+.chat-content,
+.images-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .sessions-content {
@@ -809,7 +890,6 @@ h2 {
 .chat-content {
   display: grid;
   grid-template-rows: minmax(0, 1fr) auto;
-  min-height: 0;
 }
 
 .images-content {

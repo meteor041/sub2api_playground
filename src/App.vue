@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import logoUrl from '../asset/logo.png'
 import {
   createConversation,
@@ -30,6 +30,8 @@ import type {
   ImageTaskStatus,
   UserProfile
 } from './types'
+
+const ENABLE_MOCK = import.meta.env.DEV
 
 const textModels = [
   'gpt-5.5',
@@ -180,13 +182,22 @@ const balanceLabel = computed(() => {
 
 const displayName = computed(() => profile.value?.username || profile.value?.email || '已登录用户')
 
-const displayImage = computed(() =>
-  selectedImage.value || (generatedImages.value.length > 0 ? generatedImages.value[generatedImages.value.length - 1] : null)
-)
+// -1 means "always show latest"; set to a concrete index by canvas nav arrows
+const canvasImageIndex = ref(-1)
 
-const displayImageIndex = computed(() =>
-  selectedImageIndex.value >= 0 ? selectedImageIndex.value : generatedImages.value.length - 1
-)
+const displayImage = computed(() => {
+  const imgs = generatedImages.value
+  if (imgs.length === 0) return null
+  const idx = canvasImageIndex.value
+  return (idx >= 0 && idx < imgs.length) ? imgs[idx] : imgs[imgs.length - 1]
+})
+
+const displayImageIndex = computed(() => {
+  const imgs = generatedImages.value
+  if (imgs.length === 0) return -1
+  const idx = canvasImageIndex.value
+  return (idx >= 0 && idx < imgs.length) ? idx : imgs.length - 1
+})
 
 const selectedImage = computed(() => (
   generatedImages.value.find((image, index) => imageShareKey(image, index) === selectedImageKey.value) || null
@@ -463,6 +474,12 @@ function openImageModal(image: GeneratedImage, index: number): void {
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
   selectedStandaloneImage.value = null
+}
+
+function canvasNavigate(direction: -1 | 1): void {
+  const count = generatedImages.value.length
+  if (count < 2) return
+  canvasImageIndex.value = (displayImageIndex.value + direction + count) % count
 }
 
 function openGalleryModal(item: GalleryItem): void {
@@ -1741,11 +1758,52 @@ async function refreshBalanceOnly(): Promise<void> {
   }
 }
 
+watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
+
+function makeMockSvg(bg: string, label: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="${bg}"/><text x="256" y="256" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="26" fill="rgba(255,255,255,0.6)">${label}</text></svg>`
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+}
+
+const mockImages = ENABLE_MOCK ? [
+  { id: 'mock-img-1', shareKey: 'mock-img-1', prompt: '一张复古科幻电影海报，绿色霓虹、胶片颗粒感，70年代风格', size: '1024x1024', dataUrl: makeMockSvg('#1a2744', 'Mock Image 1'), createdAt: Date.now() - 300000 },
+  { id: 'mock-img-2', shareKey: 'mock-img-2', prompt: '赛博朋克城市夜景，紫色和橙色霓虹灯，层次丰富的建筑群', size: '1536x1024', dataUrl: makeMockSvg('#2d1f3d', 'Mock Image 2'), createdAt: Date.now() - 180000 },
+  { id: 'mock-img-3', shareKey: 'mock-img-3', prompt: '水彩风格的太空飞船插画，浪漫柔和色调，宫崎骏画风', size: '1024x1536', dataUrl: makeMockSvg('#1f3d2d', 'Mock Image 3'), createdAt: Date.now() - 60000 },
+] : []
+
+const mockMessages = ENABLE_MOCK ? [
+  { id: 'mock-u1', role: 'user' as const, content: '帮我生成一张复古科幻电影海报，需要有绿色霓虹灯效果和胶片颗粒感，整体风格参考70年代科幻片。', createdAt: Date.now() - 600000 },
+  { id: 'mock-a1', role: 'assistant' as const, content: '好的！我来为你生成这张复古科幻电影海报。我会使用绿色霓虹灯效果配合胶片颗粒纹理，参考70年代科幻电影的视觉风格。', createdAt: Date.now() - 590000 },
+  { id: 'mock-a1-img', role: 'assistant' as const, content: '图片已生成完成！海报采用了深色背景配合绿色霓虹，加入了复古胶片颗粒效果，整体氛围非常符合70年代科幻片风格。', createdAt: Date.now() - 580000 },
+  { id: 'mock-u2', role: 'user' as const, content: '很棒！能不能再生成一张赛博朋克城市夜景，加入紫色和橙色的霓虹灯，要有层次感的建筑背景。', createdAt: Date.now() - 300000 },
+  { id: 'mock-a2', role: 'assistant' as const, content: '当然可以！赛博朋克城市夜景是我的强项。我会在画面中融入紫色和橙色霓虹灯，搭配层次丰富的都市建筑群，营造出典型的赛博朋克氛围。', createdAt: Date.now() - 290000 },
+  { id: 'mock-a2-img', role: 'assistant' as const, content: '赛博朋克城市夜景已生成！画面中包含了多层次的建筑剪影和霓虹灯效果，紫橙双色霓虹形成了很好的视觉对比。', createdAt: Date.now() - 280000 },
+  { id: 'mock-u3', role: 'user' as const, content: '非常漂亮！最后再来一张水彩风格的太空飞船插画，要有浪漫柔和的色调，类似宫崎骏的画风。', createdAt: Date.now() - 120000 },
+  { id: 'mock-a3-img', role: 'assistant' as const, content: '太空飞船水彩插画已完成！采用了柔和的水彩晕染效果，色调偏向浪漫的蓝紫粉渐变，飞船设计融入了宫崎骏式的有机曲线元素。', createdAt: Date.now() - 110000 },
+  { id: 'mock-u4', role: 'user' as const, content: '三张图片效果都很棒！我特别喜欢第二张赛博朋克城市夜景，层次感非常丰富。能告诉我你是怎么处理霓虹灯发光效果的吗？', createdAt: Date.now() - 60000 },
+  { id: 'mock-a4', role: 'assistant' as const, content: '谢谢！霓虹灯发光效果主要通过以下技巧实现：\n\n1. 核心发光：使用高饱和度、高亮度的纯色作为灯管颜色\n2. 光晕扩散：在核心颜色周围添加逐渐衰减的低不透明度区域，模拟真实光线散射\n3. 反射补光：对周围建筑和地面添加霓虹颜色的微弱反射，增强画面沉浸感\n4. 对比强化：将霓虹所在区域的周围背景压暗，让发光效果更突出\n\n这些技术结合起来，就能创造出层次丰富、真实感强的霓虹灯发光效果。', createdAt: Date.now() - 50000 },
+] : []
+
 onMounted(async () => {
   initializeThemeMode()
   applyBranding()
   syncViewportLayout()
   window.addEventListener('resize', syncViewportLayout)
+
+  if (ENABLE_MOCK) {
+    isAuthenticated.value = true
+    activeView.value = 'create'
+    profile.value = { id: 1, email: 'test@example.com', username: 'MockUser', role: 'user', status: 'active', balance: 9.52, concurrency: 5 }
+    const mockConv = { id: 'mock-conv-1', title: '霓虹科幻场景', createdAt: new Date(Date.now() - 3600000).toISOString(), updatedAt: new Date().toISOString(), lastMessageAt: new Date().toISOString() }
+    conversations.value = [mockConv]
+    currentConversationId.value = mockConv.id
+    chatMessages.value = mockMessages
+    generatedImages.value = mockImages
+    await refreshGallery()
+    setupGalleryObserver()
+    return
+  }
+
   await refreshGallery()
   setupGalleryObserver()
   if (isAuthenticated.value) {
@@ -2006,6 +2064,36 @@ onBeforeUnmount(() => {
                   @error="handleGeneratedImageError($event, displayImage)"
                   @click="openImageModal(displayImage, displayImageIndex)"
                 />
+
+                <button
+                  v-if="generatedImages.length > 1"
+                  class="canvas-nav-btn canvas-nav-prev"
+                  type="button"
+                  aria-label="上一张"
+                  title="上一张"
+                  @click.stop="canvasNavigate(-1)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M15 18l-6-6 6-6"/>
+                  </svg>
+                </button>
+                <button
+                  v-if="generatedImages.length > 1"
+                  class="canvas-nav-btn canvas-nav-next"
+                  type="button"
+                  aria-label="下一张"
+                  title="下一张"
+                  @click.stop="canvasNavigate(1)"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9 18l6-6-6-6"/>
+                  </svg>
+                </button>
+
+                <div v-if="generatedImages.length > 1" class="canvas-image-counter">
+                  {{ displayImageIndex + 1 }} / {{ generatedImages.length }}
+                </div>
+
                 <div class="canvas-image-actions">
                   <button
                     class="icon-button"
