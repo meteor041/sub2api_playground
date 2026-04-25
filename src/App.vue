@@ -764,7 +764,16 @@ function removePendingImageTask(taskId: string): void {
 
 function restorePendingLoadingImages(conversationId: string): void {
   for (const pendingTask of readPendingImageTasks()) {
-    if (pendingTask.conversationId === conversationId) {
+    if (pendingTask.conversationId !== conversationId) {
+      continue
+    }
+    const prefix = taskImageIdPrefix(pendingTask.taskId)
+    const hasResolvedTaskImage = generatedImages.value.some((image) => (
+      image.id.startsWith(prefix) &&
+      !isImageLoading(image) &&
+      Boolean(image.dataUrl || image.image_url || image.remoteUrl || image.assetToken)
+    ))
+    if (!hasResolvedTaskImage) {
       upsertLoadingTaskImage(pendingTask)
     }
   }
@@ -1639,7 +1648,6 @@ async function handleSendChat(): Promise<void> {
         throw new Error('图片生成成功，但响应中没有可展示的图片。')
       }
       await completePendingImageTask(pendingTask, task)
-      removePendingImageTask(task_id)
       if (!errorMessage.value) {
         setSuccess(currentConversationId.value === originConversationId
           ? '模型已自动调用生图工具并完成生成。'
@@ -1749,6 +1757,8 @@ async function completePendingImageTask(
   pendingTask: PendingImageTask,
   task: ImageTaskStatus
 ): Promise<boolean> {
+  removePendingImageTask(pendingTask.taskId)
+
   if (task.status === 'failed') {
     if (currentConversationId.value === pendingTask.conversationId) {
       await loadConversationById(pendingTask.conversationId)
@@ -1803,7 +1813,6 @@ async function monitorPendingImageTask(pendingTask: PendingImageTask): Promise<v
       }
     })
     const completed = await completePendingImageTask(pendingTask, task)
-    removePendingImageTask(pendingTask.taskId)
     await refreshBalanceOnly()
     await refreshConversationIndex()
     if (completed) {
@@ -1888,7 +1897,6 @@ async function handleGenerateImage(): Promise<void> {
     }
 
     await completePendingImageTask(pendingTask, task)
-    removePendingImageTask(task_id)
     imagePrompt.value = ''
     clearManualImageSource()
     setSuccess(currentConversationId.value === originConversationId
