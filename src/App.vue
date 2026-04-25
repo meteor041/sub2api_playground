@@ -105,6 +105,9 @@ const createMode = ref<'chat' | 'direct'>('chat')
 const themeMode = ref<'light' | 'dark'>('light')
 const sessionsCollapsed = ref(false)
 const imagesPanelOpen = ref(false)
+const mainSidebarCollapsed = ref(false)
+const workTab = ref<'sessions' | 'chat' | 'images'>('chat')
+const workSidebarOpen = ref(true)
 const email = ref('')
 const password = ref('')
 const loginBusy = ref(false)
@@ -176,6 +179,14 @@ const balanceLabel = computed(() => {
 })
 
 const displayName = computed(() => profile.value?.username || profile.value?.email || '已登录用户')
+
+const displayImage = computed(() =>
+  selectedImage.value || (generatedImages.value.length > 0 ? generatedImages.value[generatedImages.value.length - 1] : null)
+)
+
+const displayImageIndex = computed(() =>
+  selectedImageIndex.value >= 0 ? selectedImageIndex.value : generatedImages.value.length - 1
+)
 
 const selectedImage = computed(() => (
   generatedImages.value.find((image, index) => imageShareKey(image, index) === selectedImageKey.value) || null
@@ -1751,18 +1762,38 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <main class="app-shell">
+  <main class="app-shell" :class="{ 'sidebar-collapsed': mainSidebarCollapsed }">
     <aside class="sidebar">
-      <div class="brand">
-        <img class="brand-logo" :src="logoUrl" alt="MeteorAPI logo" loading="lazy" />
-        <div>
-          <strong>Image Lab</strong>
-          <span>MeteorAPI</span>
+      <div class="sidebar-top">
+        <div class="brand">
+          <img class="brand-logo" :src="logoUrl" alt="MeteorAPI logo" loading="lazy" />
+          <div v-if="!mainSidebarCollapsed" class="brand-text">
+            <strong>Image Lab</strong>
+            <span>MeteorAPI</span>
+          </div>
         </div>
+        <button
+          class="sidebar-collapse-btn"
+          type="button"
+          :aria-label="mainSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          :title="mainSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          @click="mainSidebarCollapsed = !mainSidebarCollapsed"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path v-if="mainSidebarCollapsed" d="M9 18l6-6-6-6" />
+            <path v-else d="M15 18l-6-6 6-6" />
+          </svg>
+        </button>
       </div>
 
-      <button class="theme-toggle" type="button" :aria-label="themeMode === 'dark' ? '切换到白天模式' : '切换到黑夜模式'" @click="toggleThemeMode">
-        <span>{{ themeMode === 'dark' ? '黑夜' : '白天' }}</span>
+      <button
+        class="theme-toggle"
+        type="button"
+        :aria-label="themeMode === 'dark' ? '切换到白天模式' : '切换到黑夜模式'"
+        :title="themeMode === 'dark' ? '切换到白天模式' : '切换到黑夜模式'"
+        @click="toggleThemeMode"
+      >
+        <span v-if="!mainSidebarCollapsed">{{ themeMode === 'dark' ? '黑夜' : '白天' }}</span>
         <svg v-if="themeMode === 'dark'" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 4v2M12 18v2M4 12h2M18 12h2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M17.7 6.3l-1.4 1.4M7.7 16.3l-1.4 1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z" />
         </svg>
@@ -1772,28 +1803,41 @@ onBeforeUnmount(() => {
       </button>
 
       <nav class="side-nav" aria-label="Primary">
-        <button :class="{ active: activeView === 'gallery' }" type="button" @click="activeView = 'gallery'">
-          <span>画廊</span>
-          <small>Public gallery</small>
+        <button :class="{ active: activeView === 'gallery' }" type="button" title="画廊" @click="activeView = 'gallery'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+          </svg>
+          <span v-if="!mainSidebarCollapsed">画廊</span>
+          <small v-if="!mainSidebarCollapsed">Public gallery</small>
         </button>
-        <button :class="{ active: activeView === 'create' }" type="button" @click="activeView = 'create'">
-          <span>创造</span>
-          <small>Chat & create</small>
+        <button :class="{ active: activeView === 'create' }" type="button" title="创造" @click="activeView = 'create'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+          </svg>
+          <span v-if="!mainSidebarCollapsed">创造</span>
+          <small v-if="!mainSidebarCollapsed">Chat & create</small>
         </button>
       </nav>
 
-      <div class="sidebar-account">
+      <div v-if="!mainSidebarCollapsed" class="sidebar-account">
         <template v-if="isAuthenticated">
           <span>已登录</span>
           <strong>{{ displayName }}</strong>
           <small>{{ balanceLabel }}</small>
-          <button class="ghost mini" type="button" @click="handleLogout">退出</button>
+          <button class="ghost mini" type="button" @click="handleLogout">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-1px;margin-right:3px">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+            </svg>退出
+          </button>
         </template>
         <template v-else>
           <span>游客模式</span>
           <strong>公共画廊可浏览</strong>
           <button class="primary mini" type="button" @click="activeView = 'create'">登录创造</button>
         </template>
+      </div>
+      <div v-else class="sidebar-account-mini">
+        <div class="account-dot" :class="{ 'account-dot-active': isAuthenticated }" :title="isAuthenticated ? displayName : '游客模式'"></div>
       </div>
     </aside>
 
@@ -1875,46 +1919,275 @@ onBeforeUnmount(() => {
         </section>
       </template>
 
-      <section v-else class="creator-grid" :class="{ 'sessions-is-collapsed': sessionsCollapsed && !isMobileViewport }">
-        <aside class="sessions panel" :class="{ collapsed: sessionsCollapsed && !isMobileViewport }">
-          <template v-if="sessionsCollapsed && !isMobileViewport">
-            <button
-              class="session-rail-button"
-              type="button"
-              aria-label="展开会话列表"
-              @click="sessionsCollapsed = false"
-            >
-              <span>会话</span>
-              <strong>{{ conversations.length }}</strong>
-            </button>
-            <button
-              class="session-rail-new"
-              type="button"
-              aria-label="新建会话"
-              :disabled="conversationBusy || conversationSaving"
-              @click="startNewConversation"
-            >
-              +
-            </button>
-          </template>
-          <template v-else>
-            <div class="panel-header compact session-header">
-              <div>
-                <p class="eyebrow">Sessions</p>
-                <h2>对话</h2>
-                <span class="session-current">{{ currentConversation?.title || '暂无会话' }}</span>
-              </div>
-              <div class="session-header-actions">
-                <button class="ghost mini" type="button" aria-label="收起会话列表" @click="sessionsCollapsed = true">
-                  收起
-                </button>
-                <button class="mini" type="button" :disabled="conversationBusy || conversationSaving" @click="startNewConversation">
-                  新建
-                </button>
-              </div>
+      <div v-else class="creator-layout" :class="{ 'work-sidebar-hidden': !workSidebarOpen }">
+
+        <!-- Main Canvas -->
+        <section class="creator-canvas">
+          <div class="canvas-toolbar">
+            <div class="mode-tabs" role="tablist" aria-label="创造模式">
+              <button
+                type="button" role="tab"
+                :aria-selected="createMode === 'chat'"
+                :class="{ active: createMode === 'chat' }"
+                title="对话生图"
+                @click="createMode = 'chat'"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+                </svg>
+                <span>对话</span>
+              </button>
+              <button
+                type="button" role="tab"
+                :aria-selected="createMode === 'direct'"
+                :class="{ active: createMode === 'direct' }"
+                title="直接生图"
+                @click="createMode = 'direct'"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/>
+                </svg>
+                <span>直接</span>
+              </button>
             </div>
 
-            <div class="session-list">
+            <div class="canvas-controls">
+              <select v-if="createMode === 'chat'" v-model="selectedTextModel" title="文字模型">
+                <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+              <select v-if="createMode === 'direct'" v-model="imageSize" title="图片尺寸">
+                <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
+              </select>
+              <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0" title="API Key">
+                <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
+                  {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
+                </option>
+              </select>
+              <button
+                class="canvas-icon-btn"
+                type="button"
+                :disabled="loadingApp"
+                :title="loadingApp ? '刷新中...' : '刷新'"
+                @click="refreshWorkspace"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spinning: loadingApp }">
+                  <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" />
+                </svg>
+              </button>
+              <button v-if="openAiApiKeys.length === 0" class="canvas-icon-btn" type="button" title="创建 API Key" @click="handleCreateApiKey">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                </svg>
+              </button>
+            </div>
+
+            <button
+              class="canvas-icon-btn"
+              type="button"
+              :title="workSidebarOpen ? '关闭工作面板' : '打开工作面板'"
+              @click="workSidebarOpen = !workSidebarOpen"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Canvas Main Area -->
+          <div class="canvas-main">
+            <!-- Chat mode: image canvas -->
+            <template v-if="createMode === 'chat'">
+              <div v-if="displayImage" class="canvas-image-display">
+                <img
+                  :src="imagePreviewUrl(displayImage, modalPreviewWidth)"
+                  :alt="displayImage.prompt"
+                  loading="lazy"
+                  style="cursor:zoom-in"
+                  @error="handleGeneratedImageError($event, displayImage)"
+                  @click="openImageModal(displayImage, displayImageIndex)"
+                />
+                <div class="canvas-image-actions">
+                  <button
+                    class="icon-button"
+                    type="button"
+                    aria-label="下载图片"
+                    title="下载"
+                    @click.stop="downloadImage(imageDownloadUrl(displayImage), displayImage.prompt)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                    </svg>
+                  </button>
+                  <button
+                    class="icon-button"
+                    type="button"
+                    :class="{ shared: isImageShared(displayImage, displayImageIndex) }"
+                    :disabled="isImageSharing(displayImage, displayImageIndex) || isImageShared(displayImage, displayImageIndex)"
+                    :aria-label="isImageShared(displayImage, displayImageIndex) ? '已转发' : '转发到画廊'"
+                    :title="isImageShared(displayImage, displayImageIndex) ? '已转发' : '转发'"
+                    @click.stop="handleShareImage(displayImage, displayImageIndex)"
+                  >
+                    <svg v-if="isImageShared(displayImage, displayImageIndex)" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                    <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+              <div v-else class="canvas-empty">
+                <svg viewBox="0 0 24 24" aria-hidden="true" style="width:48px;height:48px;opacity:0.25;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round">
+                  <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
+                </svg>
+                <strong>描述你想创造的画面</strong>
+                <span>在右侧「对话」栏输入提示词，模型会自动调用生图工具。</span>
+              </div>
+            </template>
+
+            <!-- Direct mode: form -->
+            <template v-else>
+              <form class="direct-canvas-form" @submit.prevent="handleGenerateImage">
+                <input
+                  ref="imageSourceInput"
+                  class="composer-file-input"
+                  type="file"
+                  accept="image/*"
+                  @change="handleManualImageChange"
+                />
+                <div class="direct-canvas-body">
+                  <div class="direct-canvas-inputs">
+                    <label>
+                      {{ imageSource ? '编辑指令' : '提示词' }}
+                      <textarea
+                        v-model="imagePrompt"
+                        rows="5"
+                        :placeholder="imageSource
+                          ? '例如：保留主体构图，把背景改成雨夜霓虹街道'
+                          : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒'"
+                      />
+                    </label>
+                    <div class="direct-canvas-actions">
+                      <button
+                        class="canvas-icon-btn"
+                        type="button"
+                        :disabled="imageBusy"
+                        :title="imageSource ? '更换原图' : '上传原图（编辑模式）'"
+                        @click="openManualImagePicker"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+                        </svg>
+                      </button>
+                      <button
+                        v-if="imageSource"
+                        class="canvas-icon-btn"
+                        type="button"
+                        :disabled="imageBusy"
+                        title="清除原图"
+                        @click="clearManualImageSource"
+                      >
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M6 6l12 12M18 6 6 18" />
+                        </svg>
+                      </button>
+                      <button class="canvas-submit-btn" :disabled="imageBusy || !selectedKeySecret" type="submit">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M5 12h13M13 6l6 6-6 6" />
+                        </svg>
+                        {{ imageBusy ? (imageTaskLabel || '处理中...') : (imageSource ? '编辑' : '生成') }}
+                      </button>
+                    </div>
+                  </div>
+                  <div class="direct-canvas-previews">
+                    <article v-if="imageSource" class="composer-preview">
+                      <img :src="imageSource.dataUrl" :alt="imageSource.name" loading="lazy" />
+                      <div class="composer-preview-meta">
+                        <span>{{ imageSource.name }}</span>
+                        <span>原图</span>
+                      </div>
+                    </article>
+                    <div v-if="generatedImages.length > 0" class="direct-result-wrap">
+                      <img
+                        :src="imagePreviewUrl(generatedImages[generatedImages.length - 1], modalPreviewWidth)"
+                        :alt="generatedImages[generatedImages.length - 1].prompt"
+                        loading="lazy"
+                        style="cursor:zoom-in"
+                        @click="openImageModal(generatedImages[generatedImages.length - 1], generatedImages.length - 1)"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </form>
+            </template>
+          </div>
+        </section>
+
+        <!-- Right Work Sidebar -->
+        <aside v-if="workSidebarOpen" class="work-sidebar panel">
+          <div class="work-tabs">
+            <button
+              class="work-tab-btn"
+              :class="{ active: workTab === 'sessions' }"
+              type="button"
+              title="会话列表"
+              @click="workTab = 'sessions'"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 6h16M4 10h16M4 14h10"/>
+              </svg>
+            </button>
+            <button
+              class="work-tab-btn"
+              :class="{ active: workTab === 'chat' }"
+              type="button"
+              title="对话"
+              @click="workTab = 'chat'"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+              </svg>
+            </button>
+            <button
+              class="work-tab-btn"
+              :class="{ active: workTab === 'images' }"
+              type="button"
+              title="生成图片"
+              @click="workTab = 'images'"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+            </button>
+            <button
+              class="work-tab-btn work-tab-close"
+              type="button"
+              title="关闭工作面板"
+              @click="workSidebarOpen = false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M15 18l-6-6 6-6"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Sessions Tab -->
+          <div v-if="workTab === 'sessions'" class="work-tab-content sessions-content">
+            <div class="work-tab-header">
+              <span class="eyebrow">Sessions</span>
+              <button
+                class="work-icon-btn"
+                type="button"
+                title="新建会话"
+                :disabled="conversationBusy || conversationSaving"
+                @click="startNewConversation"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </button>
+            </div>
+            <div class="session-list work-scroll">
               <button
                 v-for="conversation in conversations"
                 :key="conversation.id"
@@ -1929,342 +2202,203 @@ onBeforeUnmount(() => {
               </button>
               <p v-if="conversations.length === 0" class="empty">暂无会话。</p>
             </div>
-          </template>
-        </aside>
-
-        <section class="chat panel generator-card">
-          <div class="creator-toolbar">
-            <div class="creator-title">
-              <p class="eyebrow">Create</p>
-              <h2>创造空间</h2>
-            </div>
-            <div class="mode-tabs" role="tablist" aria-label="创造模式">
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="createMode === 'chat'"
-                :class="{ active: createMode === 'chat' }"
-                @click="createMode = 'chat'"
-              >
-                对话生图
-              </button>
-              <button
-                type="button"
-                role="tab"
-                :aria-selected="createMode === 'direct'"
-                :class="{ active: createMode === 'direct' }"
-                @click="createMode = 'direct'"
-              >
-                直接生图
-              </button>
-            </div>
-            <div class="top-controls">
-              <select v-model="selectedTextModel">
-                <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
-              </select>
-              <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
-                <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
-                  {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
-                </option>
-              </select>
-              <button class="ghost mini" type="button" :disabled="loadingApp" @click="refreshWorkspace">
-                {{ loadingApp ? '刷新中...' : '刷新' }}
-              </button>
-              <button v-if="openAiApiKeys.length === 0" class="mini" type="button" @click="handleCreateApiKey">
-                创建 Key
-              </button>
-            </div>
           </div>
 
-          <template v-if="createMode === 'chat'">
-            <div class="messages">
-            <article v-if="conversationBusy" class="empty">
-              正在加载会话...
-            </article>
-            <article v-else-if="chatMessages.length === 0" class="empty hero-empty">
-              <strong>像使用 Codex 一样描述你想创造的画面。</strong>
-              <span>可以输入提示词、粘贴截图，或让文字模型自动调用生图工具。</span>
-            </article>
-            <article
-              v-for="message in chatMessages"
-              :key="message.id"
-              class="message"
-              :class="message.role"
-            >
-              <div class="message-role">{{ message.role === 'user' ? '你' : '模型' }}</div>
-              <p v-if="message.content">{{ message.content }}</p>
-              <div v-if="messageImages(message).length > 0" class="message-images">
-                <div
-                  v-for="(image, index) in messageImages(message)"
-                  :key="`${image.src}-${index}`"
-                  class="message-image-card"
-                >
-                  <button
-                    class="message-image-preview"
-                    type="button"
-                    :aria-label="`查看图片 ${index + 1}`"
-                    @click="openStandaloneImageModal({
-                      src: image.downloadSrc,
-                      fallbackSrc: image.fallbackSrc,
-                      downloadSrc: image.downloadSrc,
-                      name: message.content || `${message.role}-image-${index + 1}`,
-                      description: '消息中的图片预览。',
-                      eyebrow: 'Message'
-                    })"
+          <!-- Chat Tab -->
+          <div v-if="workTab === 'chat'" class="work-tab-content chat-content">
+            <div class="messages work-scroll">
+              <article v-if="conversationBusy" class="empty">正在加载会话...</article>
+              <article v-else-if="chatMessages.length === 0" class="empty hero-empty">
+                <strong>描述你想创造的画面。</strong>
+                <span>可以输入提示词、粘贴截图，或让模型自动调用生图工具。</span>
+              </article>
+              <article
+                v-for="message in chatMessages"
+                :key="message.id"
+                class="message"
+                :class="message.role"
+              >
+                <div class="message-role">{{ message.role === 'user' ? '你' : '模型' }}</div>
+                <p v-if="message.content">{{ message.content }}</p>
+                <div v-if="messageImages(message).length > 0" class="message-images">
+                  <div
+                    v-for="(image, index) in messageImages(message)"
+                    :key="`${image.src}-${index}`"
+                    class="message-image-card"
                   >
-                    <img
-                      :src="image.src"
-                      :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
-                      loading="lazy"
-                      @error="handleImageError($event, image.fallbackSrc)"
-                    />
-                  </button>
-                  <button
-                    class="ghost mini"
-                    type="button"
-                    @click="downloadImage(image.downloadSrc, message.content || `${message.role}-image`, index + 1)"
-                  >
-                    下载图片
-                  </button>
+                    <button
+                      class="message-image-preview"
+                      type="button"
+                      :aria-label="`查看图片 ${index + 1}`"
+                      @click="openStandaloneImageModal({
+                        src: image.downloadSrc,
+                        fallbackSrc: image.fallbackSrc,
+                        downloadSrc: image.downloadSrc,
+                        name: message.content || `${message.role}-image-${index + 1}`,
+                        description: '消息中的图片预览。',
+                        eyebrow: 'Message'
+                      })"
+                    >
+                      <img
+                        :src="image.src"
+                        :alt="message.role === 'user' ? 'Uploaded image' : 'Generated image'"
+                        loading="lazy"
+                        @error="handleImageError($event, image.fallbackSrc)"
+                      />
+                    </button>
+                    <button
+                      class="icon-button"
+                      type="button"
+                      style="width:30px;height:30px"
+                      aria-label="下载图片"
+                      title="下载"
+                      @click="downloadImage(image.downloadSrc, message.content || `${message.role}-image`, index + 1)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </article>
+              </article>
             </div>
 
             <form class="composer" @submit.prevent="handleSendChat">
-            <input
-              ref="composerFileInput"
-              class="composer-file-input"
-              type="file"
-              accept="image/*"
-              multiple
-              @change="handleComposerFileChange"
-            />
-            <div class="composer-main">
-              <div v-if="composerImages.length > 0" class="composer-attachments" aria-label="待发送图片">
-                <article v-for="image in composerImages" :key="image.id" class="composer-attachment">
-                  <button
-                    class="composer-attachment-button"
-                    type="button"
-                    :aria-label="`查看图片 ${image.name}`"
-                    @click="openStandaloneImageModal({
-                      src: image.dataUrl,
-                      fallbackSrc: image.dataUrl,
-                      downloadSrc: image.dataUrl,
-                      name: image.name,
-                      description: '这张图片会作为当前对话的输入附件随消息一起发送。',
-                      mimeType: image.mimeType,
-                      eyebrow: 'Attachment'
-                    })"
-                  >
-                    <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
-                  </button>
-                  <div class="composer-attachment-meta">
-                    <span>{{ image.name }}</span>
-                  </div>
-                  <button
-                    class="composer-attachment-remove"
-                    type="button"
-                    aria-label="移除图片"
-                    @click.stop="removeComposerImage(image.id)"
-                  >
-                    ×
-                  </button>
-                </article>
-              </div>
-              <div class="composer-input-wrap">
-                <textarea
-                  v-model="chatInput"
-                  rows="4"
-                  placeholder="输入文字对话内容；明确要求画图时，模型会自动调用生图工具。"
-                  @keydown="handleComposerKeydown"
-                  @paste="handleComposerPaste"
-                />
-                <div class="composer-inline-actions">
-                  <button
-                    class="composer-icon-button"
-                    type="button"
-                    :disabled="chatBusy"
-                    aria-label="添加图片"
-                    title="添加图片"
-                    @click="openComposerFilePicker"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
-                  </button>
-                  <button
-                    class="composer-icon-button send"
-                    type="submit"
-                    :disabled="chatBusy || !selectedKeySecret"
-                    :aria-label="chatBusy ? '发送中' : '发送对话'"
-                    :title="chatBusy ? '发送中' : '发送对话'"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M5 12h13M13 6l6 6-6 6" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-            </form>
-          </template>
-
-          <form v-else class="image-form direct-form" @submit.prevent="handleGenerateImage">
-            <input
-              ref="imageSourceInput"
-              class="composer-file-input"
-              type="file"
-              accept="image/*"
-              @change="handleManualImageChange"
-            />
-            <div class="direct-grid">
-              <label>
-                图片尺寸
-                <select v-model="imageSize">
-                  <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
-                </select>
-              </label>
-              <div class="direct-upload">
-                <span>原图</span>
-                <div class="composer-tools">
-                  <button class="secondary" type="button" :disabled="imageBusy" @click="openManualImagePicker">
-                    {{ imageSource ? '更换原图' : '上传原图' }}
-                  </button>
-                  <button
-                    v-if="imageSource"
-                    class="ghost"
-                    type="button"
-                    :disabled="imageBusy"
-                    @click="clearManualImageSource"
-                  >
-                    清除
-                  </button>
-                </div>
-              </div>
-            </div>
-            <article v-if="imageSource" class="composer-preview direct-preview">
-              <img :src="imageSource.dataUrl" :alt="imageSource.name" loading="lazy" />
-              <div class="composer-preview-meta">
-                <span>{{ imageSource.name }}</span>
-                <span>编辑模式</span>
-              </div>
-            </article>
-            <label class="direct-prompt">
-              {{ imageSource ? '编辑指令' : '提示词' }}
-              <textarea
-                v-model="imagePrompt"
-                rows="9"
-                :placeholder="imageSource
-                  ? '例如：保留主体构图，把背景改成雨夜霓虹街道'
-                  : '例如：一张复古科幻电影海报，绿色霓虹、胶片颗粒'"
+              <input
+                ref="composerFileInput"
+                class="composer-file-input"
+                type="file"
+                accept="image/*"
+                multiple
+                @change="handleComposerFileChange"
               />
-            </label>
-            <button :disabled="imageBusy || !selectedKeySecret" type="submit">
-              {{ imageBusy ? imageTaskLabel || '处理中...' : (imageSource ? '编辑图片' : '生成图片') }}
-            </button>
-          </form>
-        </section>
-
-        <button
-          v-if="!isMobileViewport"
-          class="images-fab"
-          type="button"
-          :aria-expanded="isMobileViewport ? true : imagesPanelOpen"
-          aria-controls="session-images-panel"
-          @click="imagesPanelOpen = true"
-        >
-          图片
-          <strong>{{ generatedImages.length }}</strong>
-        </button>
-
-        <div
-          v-if="imagesPanelOpen && !isMobileViewport"
-          class="image-panel-scrim"
-          aria-hidden="true"
-          @click="imagesPanelOpen = false"
-        ></div>
-
-        <aside
-          v-if="imagesPanelOpen || isMobileViewport"
-          id="session-images-panel"
-          class="image panel image-drawer"
-          :class="{ 'mobile-inline': isMobileViewport }"
-          :role="isMobileViewport ? undefined : 'dialog'"
-          :aria-modal="isMobileViewport ? undefined : 'true'"
-          aria-label="当前会话图片"
-        >
-          <div class="panel-header">
-            <div>
-              <p class="eyebrow">Images</p>
-              <h2>当前图片</h2>
-            </div>
-            <div class="image-drawer-actions">
-              <span class="pill">{{ imageModel }}</span>
-              <button
-                v-if="!isMobileViewport"
-                class="ghost mini"
-                type="button"
-                aria-label="关闭图片栏"
-                @click="imagesPanelOpen = false"
-              >
-                关闭
-              </button>
-            </div>
+              <div class="composer-main">
+                <div v-if="composerImages.length > 0" class="composer-attachments" aria-label="待发送图片">
+                  <article v-for="image in composerImages" :key="image.id" class="composer-attachment">
+                    <button
+                      class="composer-attachment-button"
+                      type="button"
+                      :aria-label="`查看图片 ${image.name}`"
+                      @click="openStandaloneImageModal({
+                        src: image.dataUrl,
+                        fallbackSrc: image.dataUrl,
+                        downloadSrc: image.dataUrl,
+                        name: image.name,
+                        description: '这张图片会作为当前对话的输入附件随消息一起发送。',
+                        mimeType: image.mimeType,
+                        eyebrow: 'Attachment'
+                      })"
+                    >
+                      <img :src="image.dataUrl" :alt="image.name" loading="lazy" />
+                    </button>
+                    <div class="composer-attachment-meta">
+                      <span>{{ image.name }}</span>
+                    </div>
+                    <button
+                      class="composer-attachment-remove"
+                      type="button"
+                      aria-label="移除图片"
+                      @click.stop="removeComposerImage(image.id)"
+                    >×</button>
+                  </article>
+                </div>
+                <div class="composer-input-wrap">
+                  <textarea
+                    v-model="chatInput"
+                    rows="3"
+                    placeholder="输入提示词；明确要求画图时，模型会自动调用生图工具。"
+                    @keydown="handleComposerKeydown"
+                    @paste="handleComposerPaste"
+                  />
+                  <div class="composer-inline-actions">
+                    <button
+                      class="composer-icon-button"
+                      type="button"
+                      :disabled="chatBusy"
+                      aria-label="添加图片"
+                      title="添加图片"
+                      @click="openComposerFilePicker"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 5v14M5 12h14" />
+                      </svg>
+                    </button>
+                    <button
+                      class="composer-icon-button send"
+                      type="submit"
+                      :disabled="chatBusy || !selectedKeySecret"
+                      :aria-label="chatBusy ? '发送中' : '发送对话'"
+                      :title="chatBusy ? '发送中' : '发送'"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M5 12h13M13 6l6 6-6 6" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </form>
           </div>
 
-          <div class="local-gallery">
-            <article
-              v-for="(image, index) in generatedImages"
-              :key="imageShareKey(image, index)"
-              class="image-thumb"
-              :class="{ active: selectedImageKey === imageShareKey(image, index) }"
-              @click="openImageModal(image, index)"
-            >
-              <img
-                v-if="imageSourceUrl(image)"
-                :src="imagePreviewUrl(image, galleryPreviewWidth)"
-                :alt="image.prompt"
-                loading="lazy"
-                @error="handleGeneratedImageError($event, image)"
-              />
-              <div class="thumb-overlay">
-                <span>{{ image.size }}</span>
-                <div class="image-actions" @click.stop>
-                  <button
-                    class="icon-button"
-                    type="button"
-                    aria-label="下载图片"
-                    @click="downloadImage(imageDownloadUrl(image), image.prompt)"
-                  >
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
-                    </svg>
-                  </button>
-                  <button
-                    class="icon-button"
-                    type="button"
-                    :class="{ shared: isImageShared(image, index) }"
-                    :disabled="isImageSharing(image, index) || isImageShared(image, index)"
-                    :aria-label="isImageShared(image, index) ? '已转发' : '转发到画廊'"
-                    @click="handleShareImage(image, index)"
-                  >
-                    <svg v-if="isImageShared(image, index)" viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="m5 12 4 4L19 6" />
-                    </svg>
-                    <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
-                    </svg>
-                  </button>
+          <!-- Images Tab -->
+          <div v-if="workTab === 'images'" class="work-tab-content images-content">
+            <div class="work-tab-header">
+              <span class="eyebrow">Images</span>
+              <span class="pill">{{ imageModel }}</span>
+            </div>
+            <div class="local-gallery work-scroll">
+              <article
+                v-for="(image, index) in generatedImages"
+                :key="imageShareKey(image, index)"
+                class="image-thumb"
+                :class="{ active: selectedImageKey === imageShareKey(image, index) }"
+                @click="openImageModal(image, index)"
+              >
+                <img
+                  v-if="imageSourceUrl(image)"
+                  :src="imagePreviewUrl(image, galleryPreviewWidth)"
+                  :alt="image.prompt"
+                  loading="lazy"
+                  @error="handleGeneratedImageError($event, image)"
+                />
+                <div class="thumb-overlay">
+                  <span>{{ image.size }}</span>
+                  <div class="image-actions" @click.stop>
+                    <button
+                      class="icon-button"
+                      type="button"
+                      aria-label="下载图片"
+                      title="下载"
+                      @click="downloadImage(imageDownloadUrl(image), image.prompt)"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                      </svg>
+                    </button>
+                    <button
+                      class="icon-button"
+                      type="button"
+                      :class="{ shared: isImageShared(image, index) }"
+                      :disabled="isImageSharing(image, index) || isImageShared(image, index)"
+                      :aria-label="isImageShared(image, index) ? '已转发' : '转发到画廊'"
+                      :title="isImageShared(image, index) ? '已转发' : '转发'"
+                      @click="handleShareImage(image, index)"
+                    >
+                      <svg v-if="isImageShared(image, index)" viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m5 12 4 4L19 6" />
+                      </svg>
+                      <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-              </div>
-            </article>
-            <p v-if="generatedImages.length === 0" class="empty">
-              当前会话还没有生成图片。
-            </p>
+              </article>
+              <p v-if="generatedImages.length === 0" class="empty">当前会话还没有生成图片。</p>
+            </div>
           </div>
         </aside>
-      </section>
+      </div>
     </section>
 
     <div
