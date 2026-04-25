@@ -949,7 +949,7 @@ async function callImageUpstream(task) {
 
 function buildTaskResponse(task) {
   const status = task.status === 'completed' && !task.archived ? 'processing' : task.status
-  const result = status === 'completed' && task.result && typeof task.result === 'object'
+  const result = task.result && typeof task.result === 'object'
     ? {
       ...task.result,
       images: Array.isArray(task.result.images)
