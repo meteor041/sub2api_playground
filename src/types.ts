@@ -119,7 +119,10 @@ export interface ImageTaskResultItem {
 
 export interface ImageTaskResult {
   images: ImageTaskResultItem[]
-  raw?: unknown
+  raw?: {
+    stream?: boolean
+    events?: unknown[]
+  } | unknown
 }
 
 export interface ImageTaskStatus {

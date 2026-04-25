@@ -317,6 +317,7 @@ function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
     .map((item, index) => {
       const b64 = typeof item?.b64_json === 'string' ? item.b64_json : ''
       const remoteUrl = typeof item?.url === 'string' ? item.url : ''
+      const outputFormat = typeof item?.output_format === 'string' ? item.output_format : 'png'
       if (!b64 && !remoteUrl) {
         return null
       }
@@ -325,7 +326,7 @@ function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
         id: `image-${index + 1}`,
         prompt: fallbackPrompt,
         size: fallbackSize,
-        data_url: b64 ? `data:image/png;base64,${b64}` : null,
+        data_url: b64 ? base64ImageDataUrl(b64, outputFormat) : null,
         remote_url: remoteUrl || null,
         image_url: remoteUrl || null
       }
@@ -335,6 +336,219 @@ function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
   return {
     images,
     raw: data
+  }
+}
+
+function imageMimeType(outputFormat = '') {
+  const normalized = String(outputFormat || '').trim().toLowerCase()
+  switch (normalized) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg'
+    case 'webp':
+      return 'image/webp'
+    case 'gif':
+      return 'image/gif'
+    case 'png':
+    default:
+      return 'image/png'
+  }
+}
+
+function base64ImageDataUrl(value, outputFormat = 'png') {
+  const raw = String(value || '').trim()
+  if (!raw) {
+    return null
+  }
+  if (raw.startsWith('data:')) {
+    return raw
+  }
+  return `data:${imageMimeType(outputFormat)};base64,${raw}`
+}
+
+function createStreamImageItem(task, fields, fallbackIndex = 0) {
+  const b64 = typeof fields?.b64_json === 'string'
+    ? fields.b64_json
+    : (typeof fields?.partial_image_b64 === 'string' ? fields.partial_image_b64 : '')
+  const result = typeof fields?.result === 'string' ? fields.result : ''
+  const rawUrl = typeof fields?.url === 'string' ? fields.url.trim() : ''
+  const outputFormat = typeof fields?.output_format === 'string' ? fields.output_format : 'png'
+  const index = Number.isInteger(fields?.index)
+    ? fields.index
+    : (Number.isInteger(fields?.partial_image_index) ? fields.partial_image_index : fallbackIndex)
+  const dataUrl = base64ImageDataUrl(b64 || result, outputFormat) || (rawUrl.startsWith('data:') ? rawUrl : null)
+  const remoteUrl = rawUrl && !rawUrl.startsWith('data:') ? rawUrl : ''
+
+  if (!dataUrl && !remoteUrl) {
+    return null
+  }
+
+  return {
+    id: `image-${index + 1}`,
+    prompt: typeof fields?.revised_prompt === 'string' && fields.revised_prompt.trim()
+      ? fields.revised_prompt.trim()
+      : task.payload.prompt,
+    size: typeof fields?.size === 'string' && fields.size.trim() ? fields.size.trim() : task.payload.size,
+    data_url: dataUrl,
+    remote_url: remoteUrl || null,
+    image_url: remoteUrl || null
+  }
+}
+
+function collectStreamImageItems(event, task) {
+  if (!event || typeof event !== 'object') {
+    return []
+  }
+
+  const eventType = typeof event.type === 'string' ? event.type : ''
+  if (Array.isArray(event.data)) {
+    return normalizeImageResult(event, task.payload.prompt, task.payload.size).images
+  }
+
+  const directImage = createStreamImageItem(task, event)
+  if (
+    directImage &&
+    (
+      eventType.includes('partial_image') ||
+      eventType.endsWith('.completed') ||
+      eventType === 'image_generation.completed' ||
+      eventType === 'image_edit.completed'
+    )
+  ) {
+    return [directImage]
+  }
+
+  if (eventType === 'response.output_item.done' && event.item?.type === 'image_generation_call') {
+    const item = createStreamImageItem(task, event.item)
+    return item ? [item] : []
+  }
+
+  const output = Array.isArray(event.response?.output)
+    ? event.response.output
+    : (Array.isArray(event.output) ? event.output : [])
+  return output
+    .map((item, index) => item?.type === 'image_generation_call'
+      ? createStreamImageItem(task, { ...item, index }, index)
+      : null)
+    .filter(Boolean)
+}
+
+function summarizeStreamEvent(event) {
+  if (!event || typeof event !== 'object') {
+    return event
+  }
+  const clone = JSON.parse(JSON.stringify(event))
+  delete clone.b64_json
+  delete clone.partial_image_b64
+  delete clone.result
+  if (clone.item) {
+    delete clone.item.result
+  }
+  if (clone.response?.output && Array.isArray(clone.response.output)) {
+    clone.response.output = clone.response.output.map((item) => {
+      if (!item || typeof item !== 'object') return item
+      const next = { ...item }
+      delete next.result
+      return next
+    })
+  }
+  return clone
+}
+
+function mergeTaskStreamImages(task, images, rawEvents) {
+  if (!images.length) {
+    return false
+  }
+  const existing = Array.isArray(task.result?.images) ? task.result.images : []
+  const byId = new Map(existing.map((image, index) => [image.id || `image-${index + 1}`, image]))
+  for (const image of images) {
+    byId.set(image.id, image)
+  }
+  task.result = {
+    images: Array.from(byId.values()),
+    raw: {
+      stream: true,
+      events: rawEvents.slice(-20)
+    }
+  }
+  return true
+}
+
+function parseSseDataBlock(block) {
+  const data = String(block || '')
+    .split('\n')
+    .filter((line) => line.startsWith('data:'))
+    .map((line) => line.slice(5).trimStart())
+    .join('\n')
+    .trim()
+  if (!data || data === '[DONE]') {
+    return null
+  }
+  try {
+    return JSON.parse(data)
+  } catch {
+    return null
+  }
+}
+
+async function processImageStreamResponse(response, task) {
+  if (!response.body || typeof response.body.getReader !== 'function') {
+    const data = await readResponseJson(response)
+    task.result = normalizeImageResult(data, task.payload.prompt, task.payload.size)
+    return
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const rawEvents = []
+  let buffer = ''
+
+  async function handleBlock(block) {
+    const event = parseSseDataBlock(block)
+    if (!event) {
+      return
+    }
+    rawEvents.push(summarizeStreamEvent(event))
+    const images = collectStreamImageItems(event, task)
+    if (!mergeTaskStreamImages(task, images, rawEvents)) {
+      return
+    }
+    task.status = 'processing'
+    task.updatedAt = nowIso()
+    await updatePersistedImageTask(task)
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (value) {
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      let separatorIndex = buffer.indexOf('\n\n')
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + 2)
+        await handleBlock(block)
+        separatorIndex = buffer.indexOf('\n\n')
+      }
+    }
+    if (done) {
+      break
+    }
+  }
+
+  if (buffer.trim()) {
+    await handleBlock(buffer)
+  }
+}
+
+async function readResponseJson(response) {
+  const text = await response.text()
+  if (!text) {
+    return null
+  }
+  try {
+    return JSON.parse(text)
+  } catch {
+    return text
   }
 }
 
@@ -666,6 +880,10 @@ function normalizeTaskPayload(payload) {
   const conversationId = typeof payload?.conversation_id === 'string' ? payload.conversation_id.trim() : ''
   const source = payload?.source === 'chat' ? 'chat' : 'direct'
   const assistantMessageId = typeof payload?.assistant_message_id === 'string' ? payload.assistant_message_id.trim() : ''
+  const stream = payload?.stream !== false
+  const partialImages = Number.isInteger(payload?.partial_images) && payload.partial_images > 0
+    ? Math.min(payload.partial_images, 3)
+    : 2
 
   return {
     mode,
@@ -674,6 +892,8 @@ function normalizeTaskPayload(payload) {
     model,
     response_format: responseFormat,
     n,
+    stream,
+    partial_images: partialImages,
     images,
     conversation_id: conversationId || null,
     source,
@@ -689,6 +909,10 @@ async function callImageUpstream(task) {
     form.set('size', task.payload.size)
     form.set('n', String(task.payload.n))
     form.set('response_format', task.payload.response_format)
+    form.set('stream', String(task.payload.stream))
+    if (task.payload.stream) {
+      form.set('partial_images', String(task.payload.partial_images))
+    }
 
     for (const [index, image] of task.payload.images.entries()) {
       const blob = dataUrlToBlob(image?.data_url, image?.mime_type)
@@ -716,7 +940,9 @@ async function callImageUpstream(task) {
       prompt: task.payload.prompt,
       size: task.payload.size,
       n: task.payload.n,
-      response_format: task.payload.response_format
+      response_format: task.payload.response_format,
+      stream: task.payload.stream,
+      partial_images: task.payload.partial_images
     })
   })
 }
@@ -919,21 +1145,19 @@ async function runImageTask(task) {
 
   try {
     const response = await callImageUpstream(task)
-    const text = await response.text()
-    let data = null
-    if (text) {
-      try {
-        data = JSON.parse(text)
-      } catch {
-        data = text
-      }
-    }
 
     if (!response.ok) {
+      const data = await readResponseJson(response)
       throw appError(response.status, parseUpstreamError(data, `Image request failed: HTTP ${response.status}`))
     }
 
-    task.result = normalizeImageResult(data, task.payload.prompt, task.payload.size)
+    const contentType = response.headers.get('content-type') || ''
+    if (task.payload.stream && contentType.includes('text/event-stream')) {
+      await processImageStreamResponse(response, task)
+    } else {
+      const data = await readResponseJson(response)
+      task.result = normalizeImageResult(data, task.payload.prompt, task.payload.size)
+    }
     if (!task.result.images || task.result.images.length === 0) {
       throw new Error('图片生成成功，但响应中没有可展示的图片。')
     }

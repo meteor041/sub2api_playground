@@ -1135,6 +1135,26 @@ function describeImageTaskStatus(status: ImageTaskStatus['status']): string {
   }
 }
 
+function hasStreamingImageResult(task: ImageTaskStatus): boolean {
+  return Boolean(task.result?.raw && typeof task.result.raw === 'object' && (task.result.raw as Record<string, unknown>).stream)
+}
+
+function mergeStreamingTaskImages(task: ImageTaskStatus): void {
+  if (!currentConversationId.value || task.conversation_id !== currentConversationId.value) {
+    return
+  }
+  const images = extractGeneratedImagesFromTask(task)
+  if (images.length === 0) {
+    return
+  }
+
+  const imageIds = new Set(images.map((image) => image.id))
+  generatedImages.value = normalizeGeneratedImages([
+    ...images,
+    ...generatedImages.value.filter((image) => !imageIds.has(image.id))
+  ])
+}
+
 async function waitForImageTask(
   taskId: string,
   onStatus?: (task: ImageTaskStatus) => void
@@ -1148,7 +1168,7 @@ async function waitForImageTask(
     if (task.status === 'completed' || task.status === 'failed') {
       return task
     }
-    await sleep(2000)
+    await sleep(1000)
   }
 
   throw new Error('生图任务轮询超时，请稍后刷新页面查看结果。')
@@ -1171,6 +1191,8 @@ function buildImageTaskPayload(
       size,
       n: 1,
       response_format: 'b64_json',
+      stream: true,
+      partial_images: 2,
       conversation_id: conversationId || null,
       source,
       assistant_message_id: assistantMessageId || null,
@@ -1189,6 +1211,8 @@ function buildImageTaskPayload(
     size,
     n: 1,
     response_format: 'b64_json',
+    stream: true,
+    partial_images: 2,
     conversation_id: conversationId || null,
     source,
     assistant_message_id: assistantMessageId || null
@@ -1500,8 +1524,11 @@ async function handleSendChat(): Promise<void> {
       })
 
       const task = await waitForImageTask(task_id, (nextTask) => {
+        mergeStreamingTaskImages(nextTask)
         updateChatMessage(assistantMessage.id, {
-          content: describeImageTaskStatus(nextTask.status)
+          content: hasStreamingImageResult(nextTask)
+            ? '正在接收流式图片预览...'
+            : describeImageTaskStatus(nextTask.status)
         })
       })
 
@@ -1653,13 +1680,18 @@ async function monitorPendingImageTask(pendingTask: PendingImageTask): Promise<v
   activePendingTaskIds.add(pendingTask.taskId)
   try {
     const task = await waitForImageTask(pendingTask.taskId, (nextTask) => {
+      mergeStreamingTaskImages(nextTask)
       if (pendingTask.source === 'chat' && currentConversationId.value === pendingTask.conversationId && pendingTask.assistantMessageId) {
         updateChatMessage(pendingTask.assistantMessageId, {
-          content: describeImageTaskStatus(nextTask.status)
+          content: hasStreamingImageResult(nextTask)
+            ? '正在接收流式图片预览...'
+            : describeImageTaskStatus(nextTask.status)
         })
       }
       if (pendingTask.source === 'direct' && currentConversationId.value === pendingTask.conversationId) {
-        imageTaskLabel.value = describeImageTaskStatus(nextTask.status)
+        imageTaskLabel.value = hasStreamingImageResult(nextTask)
+          ? '正在接收流式图片预览...'
+          : describeImageTaskStatus(nextTask.status)
       }
     })
     const completed = await completePendingImageTask(pendingTask, task)
@@ -1736,7 +1768,10 @@ async function handleGenerateImage(): Promise<void> {
       : `任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
 
     const task = await waitForImageTask(task_id, (nextTask) => {
-      imageTaskLabel.value = describeImageTaskStatus(nextTask.status)
+      mergeStreamingTaskImages(nextTask)
+      imageTaskLabel.value = hasStreamingImageResult(nextTask)
+        ? '正在接收流式图片预览...'
+        : describeImageTaskStatus(nextTask.status)
     })
     if (task.status === 'failed') {
       throw new Error(task.error || '图片生成失败')
