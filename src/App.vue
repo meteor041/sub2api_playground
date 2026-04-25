@@ -464,6 +464,22 @@ function handleGeneratedImageError(event: Event, image: GeneratedImage): void {
   handleImageError(event, imageFallbackUrl(image))
 }
 
+function findGeneratedImageByUrl(url: string): { image: GeneratedImage; index: number } | null {
+  if (!url) return null
+  for (let i = 0; i < generatedImages.value.length; i++) {
+    const g = generatedImages.value[i]
+    if (
+      (g.image_url && g.image_url === url) ||
+      (g.remoteUrl && g.remoteUrl === url) ||
+      (g.dataUrl && g.dataUrl === url) ||
+      (g.assetToken && url.includes(`/assets/${g.assetToken}`))
+    ) {
+      return { image: g, index: i }
+    }
+  }
+  return null
+}
+
 function closeImageModal(): void {
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
@@ -2318,14 +2334,12 @@ onBeforeUnmount(() => {
                       class="message-image-preview"
                       type="button"
                       :aria-label="`查看图片 ${index + 1}`"
-                      @click="openStandaloneImageModal({
-                        src: image.downloadSrc,
-                        fallbackSrc: image.fallbackSrc,
-                        downloadSrc: image.downloadSrc,
-                        name: message.content || `${message.role}-image-${index + 1}`,
-                        description: '消息中的图片预览。',
-                        eyebrow: 'Message'
-                      })"
+                      @click="() => {
+                        const found = findGeneratedImageByUrl(image.downloadSrc)
+                        found
+                          ? openImageModal(found.image, found.index)
+                          : openStandaloneImageModal({ src: image.downloadSrc, fallbackSrc: image.fallbackSrc, downloadSrc: image.downloadSrc, name: message.content || `${message.role}-image-${index + 1}`, description: '消息中的图片预览。', eyebrow: 'Message' })
+                      }"
                     >
                       <img
                         :src="image.src"
