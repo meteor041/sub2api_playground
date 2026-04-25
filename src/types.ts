@@ -73,6 +73,8 @@ export interface ChatMessage {
 export interface GeneratedImage {
   id: string
   shareKey?: string
+  taskId?: string
+  status?: 'loading' | 'ready'
   prompt: string
   size: string
   dataUrl?: string

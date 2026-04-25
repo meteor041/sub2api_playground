@@ -184,19 +184,20 @@ const displayName = computed(() => profile.value?.username || profile.value?.ema
 
 // -1 means "always show latest"; set to a concrete index by canvas nav arrows
 const canvasImageIndex = ref(-1)
+const latestGeneratedImage = computed(() => generatedImages.value[0] || null)
 
 const displayImage = computed(() => {
   const imgs = generatedImages.value
   if (imgs.length === 0) return null
   const idx = canvasImageIndex.value
-  return (idx >= 0 && idx < imgs.length) ? imgs[idx] : imgs[imgs.length - 1]
+  return (idx >= 0 && idx < imgs.length) ? imgs[idx] : imgs[0]
 })
 
 const displayImageIndex = computed(() => {
   const imgs = generatedImages.value
   if (imgs.length === 0) return -1
   const idx = canvasImageIndex.value
-  return (idx >= 0 && idx < imgs.length) ? idx : imgs.length - 1
+  return (idx >= 0 && idx < imgs.length) ? idx : 0
 })
 
 const selectedImage = computed(() => (
@@ -314,11 +315,61 @@ function normalizeGeneratedImages(images: GeneratedImage[]): GeneratedImage[] {
   })
 }
 
+function isImageLoading(image?: GeneratedImage | null): boolean {
+  return image?.status === 'loading'
+}
+
+function taskImageIdPrefix(taskId: string): string {
+  return `${taskId}-`
+}
+
+function stripLoadingImages(images: GeneratedImage[]): GeneratedImage[] {
+  return images.filter((image) => !isImageLoading(image))
+}
+
+function createLoadingTaskImage(task: PendingImageTask): GeneratedImage {
+  return {
+    id: `${task.taskId}-loading`,
+    shareKey: `${task.taskId}-loading`,
+    taskId: task.taskId,
+    status: 'loading',
+    prompt: task.prompt,
+    size: task.size,
+    createdAt: Date.now()
+  }
+}
+
+function upsertLoadingTaskImage(task: PendingImageTask): void {
+  if (currentConversationId.value !== task.conversationId) {
+    return
+  }
+  const prefix = taskImageIdPrefix(task.taskId)
+  generatedImages.value = normalizeGeneratedImages([
+    createLoadingTaskImage(task),
+    ...generatedImages.value.filter((image) => !image.id.startsWith(prefix))
+  ])
+  canvasImageIndex.value = -1
+}
+
+function removeTaskImages(taskId: string): void {
+  const prefix = taskImageIdPrefix(taskId)
+  generatedImages.value = generatedImages.value.filter((image) => !image.id.startsWith(prefix))
+  if (selectedImageKey.value.startsWith(prefix)) {
+    selectedImageKey.value = ''
+  }
+}
+
 function imageSourceUrl(image: GeneratedImage): string {
+  if (isImageLoading(image)) {
+    return ''
+  }
   return image.image_url || image.dataUrl || image.remoteUrl || ''
 }
 
 function imageDownloadUrl(image: GeneratedImage): string {
+  if (isImageLoading(image)) {
+    return ''
+  }
   return imageFallbackUrl(image) || imageSourceUrl(image)
 }
 
@@ -411,6 +462,26 @@ function imageAspectRatio(size?: string): string | undefined {
   return `${dimensions.width} / ${dimensions.height}`
 }
 
+function imageAspectStyle(image?: GeneratedImage | null, fallback = '1 / 1'): Record<string, string> {
+  return {
+    aspectRatio: imageAspectRatio(image?.size) || fallback
+  }
+}
+
+function loadingImageStyle(image?: GeneratedImage | null): Record<string, string> {
+  const dimensions = parseImageSize(image?.size)
+  const frameWidth = dimensions && dimensions.height > dimensions.width
+    ? 'min(54%, 440px)'
+    : dimensions && dimensions.width > dimensions.height
+      ? 'min(78%, 820px)'
+      : 'min(64%, 620px)'
+
+  return {
+    ...imageAspectStyle(image),
+    '--loading-frame-width': frameWidth
+  }
+}
+
 function imageRelativeHeight(size?: string): number {
   const dimensions = parseImageSize(size)
   if (!dimensions) {
@@ -487,6 +558,9 @@ function closeImageModal(): void {
 }
 
 function openImageModal(image: GeneratedImage, index: number): void {
+  if (isImageLoading(image)) {
+    return
+  }
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
   selectedStandaloneImage.value = null
@@ -688,6 +762,14 @@ function removePendingImageTask(taskId: string): void {
   writePendingImageTasks(readPendingImageTasks().filter((task) => task.taskId !== taskId))
 }
 
+function restorePendingLoadingImages(conversationId: string): void {
+  for (const pendingTask of readPendingImageTasks()) {
+    if (pendingTask.conversationId === conversationId) {
+      upsertLoadingTaskImage(pendingTask)
+    }
+  }
+}
+
 function replaceOrAppendMessage(messages: ChatMessage[], message: ChatMessage): ChatMessage[] {
   const index = messages.findIndex((item) => item.id === message.id)
   if (index < 0) {
@@ -706,9 +788,10 @@ async function saveConversationSnapshot(
   nextChatMessages: ChatMessage[],
   nextGeneratedImages: GeneratedImage[]
 ): Promise<void> {
+  const persistedImages = normalizeGeneratedImages(stripLoadingImages(nextGeneratedImages))
   const result = await saveConversationState(conversationId, {
     chatMessages: nextChatMessages,
-    generatedImages: nextGeneratedImages
+    generatedImages: persistedImages
   })
   conversations.value = sortConversations(conversations.value.map((conversation) => (
     conversation.id === conversationId
@@ -741,6 +824,7 @@ async function loadConversationById(conversationId: string): Promise<void> {
     generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
     selectedImageKey.value = ''
     sharedImageKeys.value = []
+    restorePendingLoadingImages(payload.conversation.id)
   } finally {
     conversationBusy.value = false
   }
@@ -923,6 +1007,9 @@ function setupGalleryObserver(): void {
 }
 
 function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
+  if (isImageLoading(image)) {
+    return false
+  }
   if (item.sourceConversationId !== currentConversationId.value) {
     return false
   }
@@ -935,15 +1022,24 @@ function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): bool
 }
 
 function isImageShared(image: GeneratedImage, index = 0): boolean {
+  if (isImageLoading(image)) {
+    return false
+  }
   return sharedImageKeys.value.includes(imageShareKey(image, index)) ||
     galleryItems.value.some((item) => imageMatchesGalleryItem(image, item))
 }
 
 function isImageSharing(image: GeneratedImage, index = 0): boolean {
+  if (isImageLoading(image)) {
+    return false
+  }
   return sharingImageKeys.value.includes(imageShareKey(image, index))
 }
 
 async function handleShareImage(image: GeneratedImage, index = 0): Promise<void> {
+  if (isImageLoading(image)) {
+    return
+  }
   if (!isAuthenticated.value) {
     activeView.value = 'create'
     setError('请先登录后再转发图片到公共画廊。')
@@ -1149,11 +1245,12 @@ function mergeStreamingTaskImages(task: ImageTaskStatus): void {
   }
 
   const latestImage = images[images.length - 1]
-  const taskImagePrefix = `${task.task_id}-`
+  const taskImagePrefix = taskImageIdPrefix(task.task_id)
   generatedImages.value = normalizeGeneratedImages([
     latestImage,
     ...generatedImages.value.filter((image) => !image.id.startsWith(taskImagePrefix))
   ])
+  canvasImageIndex.value = -1
 }
 
 async function waitForImageTask(
@@ -1518,6 +1615,7 @@ async function handleSendChat(): Promise<void> {
         assistantMessageId: assistantMessage.id
       }
       addPendingImageTask(pendingTask)
+      upsertLoadingTaskImage(pendingTask)
       updateChatMessage(assistantMessage.id, {
         content: shouldEditSourceImage
           ? `编辑任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
@@ -1555,6 +1653,7 @@ async function handleSendChat(): Promise<void> {
     const message = error instanceof Error ? error.message : '对话请求失败'
     if (pendingTask) {
       removePendingImageTask(pendingTask.taskId)
+      removeTaskImages(pendingTask.taskId)
       if (currentConversationId.value === pendingTask.conversationId) {
         await loadConversationById(pendingTask.conversationId)
       } else {
@@ -1588,6 +1687,7 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
       return {
         id: uid('image'),
         shareKey: uid('share'),
+        status: 'ready',
         prompt,
         size,
         dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined,
@@ -1604,6 +1704,8 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
     .map((item, index) => ({
       id: `${task.task_id}-${item.id || index + 1}`,
       shareKey: `${task.task_id}-${item.id || index + 1}`,
+      taskId: task.task_id,
+      status: 'ready',
       prompt: item.prompt,
       size: item.size,
       dataUrl: item.data_url || undefined,
@@ -1679,6 +1781,11 @@ async function monitorPendingImageTask(pendingTask: PendingImageTask): Promise<v
     return
   }
   activePendingTaskIds.add(pendingTask.taskId)
+  if (currentConversationId.value === pendingTask.conversationId) {
+    imageBusy.value = true
+    imageTaskLabel.value = pendingTask.mode === 'edit' ? '图片编辑任务处理中...' : '生图任务处理中...'
+    upsertLoadingTaskImage(pendingTask)
+  }
   try {
     const task = await waitForImageTask(pendingTask.taskId, (nextTask) => {
       mergeStreamingTaskImages(nextTask)
@@ -1708,6 +1815,7 @@ async function monitorPendingImageTask(pendingTask: PendingImageTask): Promise<v
     }
   } catch (error) {
     removePendingImageTask(pendingTask.taskId)
+    removeTaskImages(pendingTask.taskId)
     const message = error instanceof Error ? error.message : '图片任务恢复失败'
     try {
       await archivePendingImageFailure(pendingTask, message)
@@ -1764,6 +1872,7 @@ async function handleGenerateImage(): Promise<void> {
       source: 'direct'
     }
     addPendingImageTask(pendingTask)
+    upsertLoadingTaskImage(pendingTask)
     imageTaskLabel.value = sourceImages.length > 0
       ? `编辑任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
       : `任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
@@ -1789,6 +1898,7 @@ async function handleGenerateImage(): Promise<void> {
   } catch (error) {
     if (pendingTask) {
       removePendingImageTask(pendingTask.taskId)
+      removeTaskImages(pendingTask.taskId)
       if (currentConversationId.value === pendingTask.conversationId) {
         await loadConversationById(pendingTask.conversationId)
       } else {
@@ -2108,7 +2218,21 @@ onBeforeUnmount(() => {
             <!-- Chat mode: image canvas -->
             <template v-if="createMode === 'chat'">
               <div v-if="displayImage" class="canvas-image-display">
+                <div
+                  v-if="isImageLoading(displayImage)"
+                  class="image-loading-frame canvas-loading-frame"
+                  :style="loadingImageStyle(displayImage)"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="image-loading-content">
+                    <div class="image-loading-spinner" aria-hidden="true"></div>
+                    <span>生成中...</span>
+                    <small>{{ displayImage.size }}</small>
+                  </div>
+                </div>
                 <img
+                  v-else
                   :src="imagePreviewUrl(displayImage, modalPreviewWidth)"
                   :alt="displayImage.prompt"
                   loading="lazy"
@@ -2118,7 +2242,7 @@ onBeforeUnmount(() => {
                 />
 
                 <button
-                  v-if="generatedImages.length > 1"
+                  v-if="!isImageLoading(displayImage) && generatedImages.length > 1"
                   class="canvas-nav-btn canvas-nav-prev"
                   type="button"
                   aria-label="上一张"
@@ -2130,7 +2254,7 @@ onBeforeUnmount(() => {
                   </svg>
                 </button>
                 <button
-                  v-if="generatedImages.length > 1"
+                  v-if="!isImageLoading(displayImage) && generatedImages.length > 1"
                   class="canvas-nav-btn canvas-nav-next"
                   type="button"
                   aria-label="下一张"
@@ -2142,11 +2266,11 @@ onBeforeUnmount(() => {
                   </svg>
                 </button>
 
-                <div v-if="generatedImages.length > 1" class="canvas-image-counter">
+                <div v-if="!isImageLoading(displayImage) && generatedImages.length > 1" class="canvas-image-counter">
                   {{ displayImageIndex + 1 }} / {{ generatedImages.length }}
                 </div>
 
-                <div class="canvas-image-actions">
+                <div v-if="!isImageLoading(displayImage)" class="canvas-image-actions">
                   <button
                     class="icon-button"
                     type="button"
@@ -2247,13 +2371,27 @@ onBeforeUnmount(() => {
                         <span>原图</span>
                       </div>
                     </article>
-                    <div v-if="generatedImages.length > 0" class="direct-result-wrap">
+                    <div v-if="latestGeneratedImage" class="direct-result-wrap" :class="{ loading: isImageLoading(latestGeneratedImage) }">
+                      <div
+                        v-if="isImageLoading(latestGeneratedImage)"
+                        class="image-loading-frame direct-loading-frame"
+                        :style="loadingImageStyle(latestGeneratedImage)"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <div class="image-loading-content">
+                          <div class="image-loading-spinner" aria-hidden="true"></div>
+                          <span>生成中...</span>
+                          <small>{{ latestGeneratedImage.size }}</small>
+                        </div>
+                      </div>
                       <img
-                        :src="imagePreviewUrl(generatedImages[generatedImages.length - 1], modalPreviewWidth)"
-                        :alt="generatedImages[generatedImages.length - 1].prompt"
+                        v-else
+                        :src="imagePreviewUrl(latestGeneratedImage, modalPreviewWidth)"
+                        :alt="latestGeneratedImage.prompt"
                         loading="lazy"
                         style="cursor:zoom-in"
-                        @click="openImageModal(generatedImages[generatedImages.length - 1], generatedImages.length - 1)"
+                        @click="openImageModal(latestGeneratedImage, 0)"
                       />
                     </div>
                   </div>
@@ -2489,11 +2627,24 @@ onBeforeUnmount(() => {
                 v-for="(image, index) in generatedImages"
                 :key="imageShareKey(image, index)"
                 class="image-thumb"
-                :class="{ active: selectedImageKey === imageShareKey(image, index) }"
+                :class="{ active: selectedImageKey === imageShareKey(image, index), loading: isImageLoading(image) }"
+                :style="imageAspectStyle(image, '4 / 5')"
                 @click="openImageModal(image, index)"
               >
+                <div
+                  v-if="isImageLoading(image)"
+                  class="image-loading-frame thumb-loading-frame"
+                  :style="loadingImageStyle(image)"
+                  role="status"
+                  aria-live="polite"
+                >
+                  <div class="image-loading-content compact">
+                    <div class="image-loading-spinner" aria-hidden="true"></div>
+                    <span>生成中...</span>
+                  </div>
+                </div>
                 <img
-                  v-if="imageSourceUrl(image)"
+                  v-else-if="imageSourceUrl(image)"
                   :src="imagePreviewUrl(image, galleryPreviewWidth)"
                   :alt="image.prompt"
                   loading="lazy"
@@ -2501,7 +2652,7 @@ onBeforeUnmount(() => {
                 />
                 <div class="thumb-overlay">
                   <span>{{ image.size }}</span>
-                  <div class="image-actions" @click.stop>
+                  <div v-if="!isImageLoading(image)" class="image-actions" @click.stop>
                     <button
                       class="icon-button"
                       type="button"
