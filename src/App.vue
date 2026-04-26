@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import logoUrl from '../asset/logo.png'
 import {
   createConversation,
@@ -155,6 +155,13 @@ const selectedGalleryItem = ref<GalleryItem | null>(null)
 const selectedStandaloneImage = ref<StandalonePreviewImage | null>(null)
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
+const localEditOpen = ref(false)
+const localEditPrompt = ref('')
+const localEditBrushSize = ref(48)
+const localEditMaskHasMarks = ref(false)
+const localEditDrawing = ref(false)
+const localEditMaskCanvas = ref<HTMLCanvasElement | null>(null)
+const localEditImageElement = ref<HTMLImageElement | null>(null)
 
 const openAiGroups = computed(() =>
   groups.value.filter((group) => group.platform === 'openai' && group.status === 'active')
@@ -208,6 +215,14 @@ const selectedImageIndex = computed(() => (
   generatedImages.value.findIndex((image, index) => imageShareKey(image, index) === selectedImageKey.value)
 ))
 
+const canSubmitLocalEdit = computed(() => (
+  Boolean(selectedImage.value) &&
+  Boolean(selectedKeySecret.value) &&
+  localEditPrompt.value.trim().length > 0 &&
+  localEditMaskHasMarks.value &&
+  !imageBusy.value
+))
+
 const currentConversation = computed(() => (
   conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
@@ -230,6 +245,12 @@ interface GenerateImageToolArgs {
 
 type ImageTaskPayload = Record<string, unknown> & {
   mode: 'generate' | 'edit'
+}
+
+interface ImageEditMask {
+  name: string
+  mimeType: string
+  dataUrl: string
 }
 
 interface PendingImageTask {
@@ -551,10 +572,27 @@ function findGeneratedImageByUrl(url: string): { image: GeneratedImage; index: n
   return null
 }
 
+function clearLocalEditMask(): void {
+  const canvas = localEditMaskCanvas.value
+  const context = canvas?.getContext('2d')
+  if (canvas && context) {
+    context.clearRect(0, 0, canvas.width, canvas.height)
+  }
+  localEditMaskHasMarks.value = false
+  localEditDrawing.value = false
+}
+
+function resetLocalEditState(): void {
+  localEditOpen.value = false
+  localEditPrompt.value = ''
+  clearLocalEditMask()
+}
+
 function closeImageModal(): void {
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
   selectedStandaloneImage.value = null
+  resetLocalEditState()
 }
 
 function openImageModal(image: GeneratedImage, index: number): void {
@@ -564,6 +602,7 @@ function openImageModal(image: GeneratedImage, index: number): void {
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
   selectedStandaloneImage.value = null
+  resetLocalEditState()
 }
 
 function canvasNavigate(direction: -1 | 1): void {
@@ -576,16 +615,184 @@ function openGalleryModal(item: GalleryItem): void {
   selectedGalleryItem.value = item
   selectedImageKey.value = ''
   selectedStandaloneImage.value = null
+  resetLocalEditState()
 }
 
 function openStandaloneImageModal(image: StandalonePreviewImage): void {
   selectedStandaloneImage.value = image
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
+  resetLocalEditState()
 }
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
   handleImageError(event, galleryFallbackUrl(item))
+}
+
+function syncLocalEditMaskCanvas(): boolean {
+  const canvas = localEditMaskCanvas.value
+  const image = localEditImageElement.value
+  if (!canvas || !image || image.naturalWidth <= 0 || image.naturalHeight <= 0) {
+    return false
+  }
+
+  if (canvas.width !== image.naturalWidth || canvas.height !== image.naturalHeight) {
+    canvas.width = image.naturalWidth
+    canvas.height = image.naturalHeight
+    localEditMaskHasMarks.value = false
+  }
+  return true
+}
+
+function resetLocalEditMaskCanvas(): void {
+  if (syncLocalEditMaskCanvas()) {
+    clearLocalEditMask()
+  }
+}
+
+async function openLocalEditPanel(): Promise<void> {
+  if (!selectedImage.value || isImageLoading(selectedImage.value)) {
+    return
+  }
+  localEditOpen.value = true
+  localEditPrompt.value = ''
+  await nextTick()
+  resetLocalEditMaskCanvas()
+}
+
+function handleLocalEditImageLoad(): void {
+  if (localEditOpen.value) {
+    resetLocalEditMaskCanvas()
+  }
+}
+
+function localEditCanvasPoint(event: PointerEvent): { x: number; y: number } | null {
+  const canvas = localEditMaskCanvas.value
+  if (!canvas || !syncLocalEditMaskCanvas()) {
+    return null
+  }
+  const rect = canvas.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) {
+    return null
+  }
+  return {
+    x: ((event.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((event.clientY - rect.top) / rect.height) * canvas.height
+  }
+}
+
+function prepareLocalEditMaskContext(context: CanvasRenderingContext2D): void {
+  context.lineCap = 'round'
+  context.lineJoin = 'round'
+  context.lineWidth = localEditBrushSize.value
+  context.strokeStyle = '#ff4f2e'
+}
+
+function startLocalEditMaskStroke(event: PointerEvent): void {
+  if (!localEditOpen.value || imageBusy.value) {
+    return
+  }
+  const canvas = localEditMaskCanvas.value
+  const context = canvas?.getContext('2d')
+  const point = localEditCanvasPoint(event)
+  if (!canvas || !context || !point) {
+    return
+  }
+
+  event.preventDefault()
+  canvas.setPointerCapture(event.pointerId)
+  localEditDrawing.value = true
+  prepareLocalEditMaskContext(context)
+  context.beginPath()
+  context.moveTo(point.x, point.y)
+  context.lineTo(point.x + 0.01, point.y + 0.01)
+  context.stroke()
+  localEditMaskHasMarks.value = true
+}
+
+function moveLocalEditMaskStroke(event: PointerEvent): void {
+  if (!localEditDrawing.value || imageBusy.value) {
+    return
+  }
+  const context = localEditMaskCanvas.value?.getContext('2d')
+  const point = localEditCanvasPoint(event)
+  if (!context || !point) {
+    return
+  }
+
+  event.preventDefault()
+  prepareLocalEditMaskContext(context)
+  context.lineTo(point.x, point.y)
+  context.stroke()
+  localEditMaskHasMarks.value = true
+}
+
+function stopLocalEditMaskStroke(event?: PointerEvent): void {
+  if (event && localEditMaskCanvas.value?.hasPointerCapture(event.pointerId)) {
+    localEditMaskCanvas.value.releasePointerCapture(event.pointerId)
+  }
+  localEditDrawing.value = false
+}
+
+function createLocalEditMaskDataUrl(): string {
+  const canvas = localEditMaskCanvas.value
+  if (!canvas || !syncLocalEditMaskCanvas()) {
+    throw new Error('遮罩画布尚未准备好。')
+  }
+  if (!localEditMaskHasMarks.value) {
+    throw new Error('请先用画笔标记需要局部修改的区域。')
+  }
+
+  const output = document.createElement('canvas')
+  output.width = canvas.width
+  output.height = canvas.height
+  const context = output.getContext('2d')
+  if (!context) {
+    throw new Error('无法生成遮罩图片。')
+  }
+
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, output.width, output.height)
+  context.globalCompositeOperation = 'destination-out'
+  context.drawImage(canvas, 0, 0)
+  return output.toDataURL('image/png')
+}
+
+async function resolveImageDataUrl(source: string): Promise<{ dataUrl: string; mimeType: string }> {
+  if (source.startsWith('data:')) {
+    return {
+      dataUrl: source,
+      mimeType: mimeTypeFromDataUrl(source)
+    }
+  }
+
+  const response = await fetch(source, { credentials: 'same-origin' })
+  if (!response.ok) {
+    throw new Error(`读取原图失败：HTTP ${response.status}`)
+  }
+  const blob = await response.blob()
+  const dataUrl = await readBlobAsDataUrl(blob)
+  return {
+    dataUrl,
+    mimeType: blob.type || mimeTypeFromDataUrl(dataUrl)
+  }
+}
+
+async function createLocalEditSourceAttachment(image: GeneratedImage): Promise<ChatImageAttachment> {
+  const source = imageFallbackUrl(image) || imageSourceUrl(image)
+  if (!source) {
+    throw new Error('这张图片没有可用于局部修改的原图。')
+  }
+
+  const resolved = await resolveImageDataUrl(source)
+  return {
+    id: uid('local-edit-source'),
+    name: buildImageFilename(image.prompt || 'local-edit-source', 1, inferImageExtension(resolved.dataUrl, resolved.mimeType)),
+    mimeType: resolved.mimeType,
+    dataUrl: resolved.dataUrl,
+    assetToken: image.assetToken,
+    image_url: image.image_url
+  }
 }
 
 const galleryColumns = computed(() => {
@@ -648,6 +855,26 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(new Error('读取图片失败'))
     reader.readAsDataURL(file)
   })
+}
+
+function readBlobAsDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result)
+        return
+      }
+      reject(new Error('读取图片失败'))
+    }
+    reader.onerror = () => reject(new Error('读取图片失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+function mimeTypeFromDataUrl(dataUrl: string): string {
+  const match = /^data:([^;,]+)/i.exec(dataUrl)
+  return match?.[1] || 'image/png'
 }
 
 async function createChatImageAttachment(file: File): Promise<ChatImageAttachment> {
@@ -1287,7 +1514,8 @@ function buildImageTaskPayload(
   sourceImages: ChatImageAttachment[] = [],
   conversationId = currentConversationId.value,
   source: 'chat' | 'direct' = 'direct',
-  assistantMessageId?: string
+  assistantMessageId?: string,
+  mask?: ImageEditMask
 ): ImageTaskPayload {
   const trimmedPrompt = prompt.trim()
   if (sourceImages.length > 0) {
@@ -1303,6 +1531,15 @@ function buildImageTaskPayload(
       conversation_id: conversationId || null,
       source,
       assistant_message_id: assistantMessageId || null,
+      ...(mask
+        ? {
+          mask: {
+            name: mask.name,
+            mime_type: mask.mimeType,
+            data_url: mask.dataUrl
+          }
+        }
+        : {}),
       images: sourceImages.map((image) => ({
         name: image.name,
         mime_type: image.mimeType,
@@ -1713,7 +1950,7 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
       id: `${task.task_id}-${item.id || index + 1}`,
       shareKey: `${task.task_id}-${item.id || index + 1}`,
       taskId: task.task_id,
-      status: 'ready',
+      status: task.status === 'completed' ? 'ready' : 'loading',
       prompt: item.prompt,
       size: item.size,
       dataUrl: item.data_url || undefined,
@@ -1844,6 +2081,91 @@ async function monitorPendingImageTask(pendingTask: PendingImageTask): Promise<v
 function resumePendingImageTasks(): void {
   for (const pendingTask of readPendingImageTasks()) {
     void monitorPendingImageTask(pendingTask)
+  }
+}
+
+async function handleLocalEditSubmit(): Promise<void> {
+  if (!selectedImage.value || isImageLoading(selectedImage.value)) {
+    return
+  }
+  if (!currentConversationId.value) {
+    setError('请先选择或创建一个会话。')
+    return
+  }
+
+  const apiKey = selectedKeySecret.value
+  const prompt = localEditPrompt.value.trim()
+  if (!apiKey) {
+    setError('请先选择或创建一个 OpenAI 分组 API Key。')
+    return
+  }
+  if (!prompt) {
+    setError('请输入局部修改提示词。')
+    return
+  }
+
+  const originConversationId = currentConversationId.value
+  const sourceImage = selectedImage.value
+  const size = sourceImage.size || imageSize.value
+  imageBusy.value = true
+  imageTaskLabel.value = '正在创建局部修改任务...'
+  let pendingTask: PendingImageTask | null = null
+
+  try {
+    const maskDataUrl = createLocalEditMaskDataUrl()
+    const sourceAttachment = await createLocalEditSourceAttachment(sourceImage)
+    const mask: ImageEditMask = {
+      name: 'mask.png',
+      mimeType: 'image/png',
+      dataUrl: maskDataUrl
+    }
+    const { task_id } = await createImageTask(
+      apiKey,
+      buildImageTaskPayload(prompt, size, [sourceAttachment], originConversationId, 'direct', undefined, mask)
+    )
+
+    pendingTask = {
+      taskId: task_id,
+      conversationId: originConversationId,
+      mode: 'edit',
+      prompt,
+      size,
+      source: 'direct'
+    }
+    addPendingImageTask(pendingTask)
+    upsertLoadingTaskImage(pendingTask)
+    closeImageModal()
+    imageTaskLabel.value = `局部修改任务已创建（${task_id.slice(0, 8)}），正在轮询结果...`
+
+    const task = await waitForImageTask(task_id, (nextTask) => {
+      mergeStreamingTaskImages(nextTask)
+      imageTaskLabel.value = hasStreamingImageResult(nextTask)
+        ? '正在接收流式图片预览...'
+        : describeImageTaskStatus(nextTask.status)
+    })
+    if (task.status === 'failed') {
+      throw new Error(task.error || '局部修改失败')
+    }
+
+    await completePendingImageTask(pendingTask, task)
+    setSuccess(currentConversationId.value === originConversationId
+      ? '局部修改完成，结果已保存到当前会话。'
+      : '后台局部修改已完成，结果已保存到原会话。')
+    await refreshBalanceOnly()
+  } catch (error) {
+    if (pendingTask) {
+      removePendingImageTask(pendingTask.taskId)
+      removeTaskImages(pendingTask.taskId)
+      if (currentConversationId.value === pendingTask.conversationId) {
+        await loadConversationById(pendingTask.conversationId)
+      } else {
+        await refreshConversationIndex()
+      }
+    }
+    setError(error instanceof Error ? error.message : '局部修改失败')
+  } finally {
+    imageBusy.value = false
+    imageTaskLabel.value = ''
   }
 }
 
@@ -2708,46 +3030,120 @@ onBeforeUnmount(() => {
     >
       <article class="image-modal-card">
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
-        <div class="modal-image-wrap">
-          <img
-            :src="selectedImage ? imagePreviewUrl(selectedImage, modalPreviewWidth) : (selectedGalleryItem ? galleryModalUrl(selectedGalleryItem) : '')"
-            :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
-            loading="lazy"
-            @error="selectedImage
-              ? handleGeneratedImageError($event, selectedImage)
-              : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined)"
-          />
-          <div class="modal-actions">
-            <button
-              class="icon-button"
-              type="button"
-              aria-label="下载图片"
-              @click="downloadImage(
-                selectedImage ? imageDownloadUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
-                selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
-              )"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
-              </svg>
-            </button>
-            <button
-              v-if="selectedImage"
-              class="icon-button"
-              type="button"
-              :class="{ shared: isImageShared(selectedImage, selectedImageIndex) }"
-              :disabled="isImageSharing(selectedImage, selectedImageIndex) || isImageShared(selectedImage, selectedImageIndex)"
-              :aria-label="isImageShared(selectedImage, selectedImageIndex) ? '已转发' : '转发到画廊'"
-              @click="handleShareImage(selectedImage, selectedImageIndex)"
-            >
-              <svg v-if="isImageShared(selectedImage, selectedImageIndex)" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="m5 12 4 4L19 6" />
-              </svg>
-              <svg v-else viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
-              </svg>
-            </button>
+        <div class="modal-image-column">
+          <div class="modal-image-wrap" :class="{ 'local-edit-active': localEditOpen && selectedImage }">
+            <div v-if="selectedImage && localEditOpen" class="local-edit-stage">
+              <img
+                ref="localEditImageElement"
+                :src="imageDownloadUrl(selectedImage)"
+                :alt="selectedImage.prompt"
+                loading="lazy"
+                @load="handleLocalEditImageLoad"
+                @error="handleGeneratedImageError($event, selectedImage)"
+              />
+              <canvas
+                ref="localEditMaskCanvas"
+                class="local-edit-mask-canvas"
+                aria-label="遮罩画笔"
+                @pointerdown="startLocalEditMaskStroke"
+                @pointermove="moveLocalEditMaskStroke"
+                @pointerup="stopLocalEditMaskStroke"
+                @pointercancel="stopLocalEditMaskStroke"
+              ></canvas>
+            </div>
+            <img
+              v-else
+              :src="selectedImage ? imagePreviewUrl(selectedImage, modalPreviewWidth) : (selectedGalleryItem ? galleryModalUrl(selectedGalleryItem) : '')"
+              :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
+              loading="lazy"
+              @error="selectedImage
+                ? handleGeneratedImageError($event, selectedImage)
+                : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined)"
+            />
+            <div class="modal-actions">
+              <button
+                class="icon-button"
+                type="button"
+                aria-label="下载图片"
+                @click="downloadImage(
+                  selectedImage ? imageDownloadUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
+                  selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
+                )"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                </svg>
+              </button>
+              <button
+                v-if="selectedImage"
+                class="icon-button"
+                type="button"
+                :class="{ shared: isImageShared(selectedImage, selectedImageIndex) }"
+                :disabled="isImageSharing(selectedImage, selectedImageIndex) || isImageShared(selectedImage, selectedImageIndex)"
+                :aria-label="isImageShared(selectedImage, selectedImageIndex) ? '已转发' : '转发到画廊'"
+                @click="handleShareImage(selectedImage, selectedImageIndex)"
+              >
+                <svg v-if="isImageShared(selectedImage, selectedImageIndex)" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m5 12 4 4L19 6" />
+                </svg>
+                <svg v-else viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" />
+                </svg>
+              </button>
+              <button
+                v-if="selectedImage"
+                class="icon-button"
+                type="button"
+                :class="{ active: localEditOpen }"
+                :disabled="imageBusy"
+                :aria-label="localEditOpen ? '关闭局部修改' : '局部修改'"
+                :title="localEditOpen ? '关闭局部修改' : '局部修改'"
+                @click="localEditOpen ? resetLocalEditState() : openLocalEditPanel()"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                </svg>
+              </button>
+            </div>
           </div>
+          <form v-if="selectedImage && localEditOpen" class="local-edit-form" @submit.prevent="handleLocalEditSubmit">
+            <div class="local-edit-toolbar">
+              <label class="local-edit-brush-control">
+                <span>画笔</span>
+                <input
+                  v-model.number="localEditBrushSize"
+                  type="range"
+                  min="12"
+                  max="160"
+                  step="4"
+                  :disabled="imageBusy"
+                />
+                <output>{{ localEditBrushSize }}px</output>
+              </label>
+              <button
+                class="local-edit-clear-btn"
+                type="button"
+                :disabled="imageBusy || !localEditMaskHasMarks"
+                @click="clearLocalEditMask"
+              >
+                清除
+              </button>
+            </div>
+            <div class="local-edit-prompt-row">
+              <textarea
+                v-model="localEditPrompt"
+                rows="2"
+                placeholder="描述只修改遮罩区域，例如：把天空换成戏剧性的日落"
+                :disabled="imageBusy"
+              ></textarea>
+              <button class="canvas-submit-btn local-edit-submit-btn" :disabled="!canSubmitLocalEdit" type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h13M13 6l6 6-6 6" />
+                </svg>
+                {{ imageBusy ? '处理中...' : '提交修改' }}
+              </button>
+            </div>
+          </form>
         </div>
         <div class="modal-copy">
           <p class="eyebrow">Prompt</p>

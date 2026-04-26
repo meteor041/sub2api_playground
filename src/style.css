@@ -1473,6 +1473,11 @@ h2 {
   background: rgba(24, 121, 78, 0.86);
 }
 
+.icon-button.active {
+  color: #fff;
+  background: rgba(255, 79, 46, 0.92);
+}
+
 .image-modal {
   position: fixed;
   inset: 0;
@@ -1515,6 +1520,13 @@ h2 {
   box-shadow: none;
 }
 
+.modal-image-column {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 12px;
+}
+
 .modal-image-wrap {
   position: relative;
   overflow: hidden;
@@ -1526,6 +1538,10 @@ h2 {
   min-height: 0;
 }
 
+.modal-image-wrap.local-edit-active {
+  align-items: center;
+}
+
 .modal-image-wrap img {
   max-width: 100%;
   max-height: min(740px, calc(100vh - 120px));
@@ -1533,6 +1549,99 @@ h2 {
   height: auto;
   display: block;
   object-fit: contain;
+}
+
+.local-edit-stage {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  max-height: min(660px, calc(100vh - 260px));
+}
+
+.local-edit-stage img {
+  max-height: min(660px, calc(100vh - 260px));
+  user-select: none;
+  pointer-events: none;
+}
+
+.local-edit-mask-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  opacity: 0.46;
+  cursor: crosshair;
+}
+
+.local-edit-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 12px;
+  background: var(--tile-bg);
+}
+
+.local-edit-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.local-edit-brush-control {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.local-edit-brush-control input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.local-edit-brush-control output {
+  min-width: 44px;
+  color: var(--ink);
+  text-align: right;
+}
+
+.local-edit-clear-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--surface);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+}
+
+.local-edit-prompt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
+}
+
+.local-edit-prompt-row textarea {
+  min-height: 54px;
+  max-height: 120px;
+  resize: vertical;
+}
+
+.local-edit-submit-btn {
+  min-width: 118px;
+  justify-content: center;
+  white-space: nowrap;
 }
 
 .modal-actions {
@@ -1760,6 +1869,27 @@ h2 {
 
   .image-modal-card {
     grid-template-columns: 1fr;
+  }
+
+  .modal-image-column {
+    min-height: 320px;
+  }
+
+  .local-edit-toolbar,
+  .local-edit-prompt-row {
+    grid-template-columns: 1fr;
+  }
+
+  .local-edit-toolbar {
+    align-items: stretch;
+  }
+
+  .local-edit-brush-control {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .local-edit-submit-btn {
+    width: 100%;
   }
 
   .message {

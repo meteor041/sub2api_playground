@@ -873,6 +873,14 @@ function normalizeTaskPayload(payload) {
   const responseFormat = typeof payload?.response_format === 'string' ? payload.response_format.trim() : 'b64_json'
   const n = Number.isInteger(payload?.n) && payload.n > 0 ? payload.n : 1
   const images = Array.isArray(payload?.images) ? payload.images : []
+  const rawMask = payload?.mask && typeof payload.mask === 'object' ? payload.mask : null
+  const mask = rawMask && typeof rawMask.data_url === 'string' && rawMask.data_url.trim()
+    ? {
+      name: typeof rawMask.name === 'string' && rawMask.name.trim() ? rawMask.name.trim() : 'mask.png',
+      mime_type: typeof rawMask.mime_type === 'string' && rawMask.mime_type.trim() ? rawMask.mime_type.trim() : 'image/png',
+      data_url: rawMask.data_url
+    }
+    : null
   const conversationId = typeof payload?.conversation_id === 'string' ? payload.conversation_id.trim() : ''
   const source = payload?.source === 'chat' ? 'chat' : 'direct'
   const assistantMessageId = typeof payload?.assistant_message_id === 'string' ? payload.assistant_message_id.trim() : ''
@@ -891,6 +899,7 @@ function normalizeTaskPayload(payload) {
     stream,
     partial_images: partialImages,
     images,
+    mask,
     conversation_id: conversationId || null,
     source,
     assistant_message_id: assistantMessageId || null
@@ -914,6 +923,13 @@ async function callImageUpstream(task) {
       const blob = dataUrlToBlob(image?.data_url, image?.mime_type)
       const filename = typeof image?.name === 'string' && image.name.trim() ? image.name.trim() : `edit-source-${index + 1}.png`
       form.append('image', blob, filename)
+    }
+    if (task.payload.mask?.data_url) {
+      const blob = dataUrlToBlob(task.payload.mask.data_url, task.payload.mask.mime_type || 'image/png')
+      const filename = typeof task.payload.mask.name === 'string' && task.payload.mask.name.trim()
+        ? task.payload.mask.name.trim()
+        : 'mask.png'
+      form.append('mask', blob, filename)
     }
 
     return fetch(`${upstream}/v1/images/edits`, {
