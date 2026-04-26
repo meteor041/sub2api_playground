@@ -553,6 +553,30 @@ function dataUrlToBlob(dataUrl, fallbackMimeType) {
   return new Blob([buffer], { type: mimeType })
 }
 
+async function bodyToBuffer(body) {
+  if (!body) {
+    return Buffer.alloc(0)
+  }
+  if (Buffer.isBuffer(body)) {
+    return body
+  }
+  if (body instanceof Uint8Array) {
+    return Buffer.from(body)
+  }
+  if (typeof body.transformToByteArray === 'function') {
+    return Buffer.from(await body.transformToByteArray())
+  }
+  if (typeof body.transformToWebStream === 'function') {
+    return bodyToBuffer(Readable.fromWeb(body.transformToWebStream()))
+  }
+
+  const chunks = []
+  for await (const chunk of body) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  }
+  return Buffer.concat(chunks)
+}
+
 function dataUrlToBuffer(dataUrl, fallbackMimeType) {
   const match = /^data:([^;,]+)?(;base64)?,(.*)$/i.exec(String(dataUrl || ''))
   if (!match) {
@@ -668,6 +692,34 @@ function resolveImageUrl(assetToken, remoteUrl) {
   return directUrl || null
 }
 
+function assetTokenFromUrl(value) {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) {
+    return ''
+  }
+
+  try {
+    const url = new URL(raw, 'http://local')
+    const assetMatch = url.pathname.match(/\/api\/playground\/assets\/([^/?#]+)/)
+    if (assetMatch) {
+      return decodeURIComponent(assetMatch[1])
+    }
+
+    const cdnBase = new URL(imageCdnBase)
+    if (url.origin === cdnBase.origin) {
+      const basePath = cdnBase.pathname.replace(/\/+$/g, '')
+      const prefix = basePath ? `${basePath}/` : '/'
+      if (url.pathname.startsWith(prefix)) {
+        return decodeURIComponent(url.pathname.slice(prefix.length).split('/')[0] || '')
+      }
+    }
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
 function shouldKeepLocalAssetCopy() {
   return !r2Configured || keepLocalAssets
 }
@@ -754,6 +806,60 @@ async function streamAssetFromR2(res, asset, { headOnly = false, downloadName = 
   }
 
   throw appError(500, 'Unsupported asset stream')
+}
+
+async function loadAssetBuffer(asset) {
+  const localPath = assetAbsolutePath(asset.file_path)
+  if (existsSync(localPath)) {
+    return {
+      buffer: await readFile(localPath),
+      mimeType: asset.mime_type || 'image/png'
+    }
+  }
+
+  if (r2Client && r2Bucket) {
+    const key = assetObjectKey(asset.public_token)
+    if (!key) {
+      throw appError(404, 'Asset file not found')
+    }
+    const response = await r2Client.send(new GetObjectCommand({
+      Bucket: r2Bucket,
+      Key: key
+    }))
+    return {
+      buffer: await bodyToBuffer(response.Body),
+      mimeType: response.ContentType || asset.mime_type || 'image/png'
+    }
+  }
+
+  const remoteUrl = assetImageUrl(asset.public_token)
+  if (remoteUrl) {
+    return fetchImageUrlBuffer(remoteUrl, asset.mime_type || 'image/png')
+  }
+
+  throw appError(404, 'Asset file not found')
+}
+
+async function fetchImageUrlBuffer(value, fallbackMimeType = 'image/png') {
+  let url
+  try {
+    url = new URL(String(value || '').trim())
+  } catch {
+    throw appError(400, 'Invalid image URL')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw appError(400, 'Invalid image URL')
+  }
+
+  const response = await fetch(url)
+  if (!response.ok) {
+    throw appError(response.status, `Unable to fetch edit source image: HTTP ${response.status}`)
+  }
+  const mimeType = response.headers.get('content-type') || fallbackMimeType || 'image/png'
+  return {
+    buffer: Buffer.from(await response.arrayBuffer()),
+    mimeType
+  }
 }
 
 async function persistAssetBinary(asset, buffer, mimeType) {
@@ -906,6 +1012,39 @@ function normalizeTaskPayload(payload) {
   }
 }
 
+async function resolveEditImageBlob(image, task, index) {
+  const dataUrl = typeof image?.data_url === 'string' ? image.data_url.trim() : ''
+  if (dataUrl.startsWith('data:')) {
+    return dataUrlToBlob(dataUrl, image?.mime_type)
+  }
+
+  const assetToken = (
+    typeof image?.asset_token === 'string' ? image.asset_token.trim() : ''
+  ) || assetTokenFromUrl(dataUrl) || assetTokenFromUrl(image?.image_url) || assetTokenFromUrl(image?.remote_url)
+
+  if (assetToken) {
+    const asset = await getAssetByToken(assetToken)
+    if (!asset || Number(asset.user_id) !== Number(task.userId)) {
+      throw appError(404, 'Edit source image not found')
+    }
+    const { buffer, mimeType } = await loadAssetBuffer(asset)
+    return new Blob([buffer], { type: mimeType || image?.mime_type || asset.mime_type || 'image/png' })
+  }
+
+  const remoteUrl = (
+    typeof image?.remote_url === 'string' ? image.remote_url.trim() : ''
+  ) || (
+    typeof image?.image_url === 'string' ? image.image_url.trim() : ''
+  ) || (/^https?:\/\//i.test(dataUrl) ? dataUrl : '')
+
+  if (remoteUrl) {
+    const { buffer, mimeType } = await fetchImageUrlBuffer(remoteUrl, image?.mime_type || 'image/png')
+    return new Blob([buffer], { type: mimeType || image?.mime_type || 'image/png' })
+  }
+
+  throw appError(400, `Edit source image ${index + 1} is missing data_url, asset_token, or image_url`)
+}
+
 async function callImageUpstream(task) {
   if (task.payload.mode === 'edit') {
     const form = new FormData()
@@ -920,7 +1059,7 @@ async function callImageUpstream(task) {
     }
 
     for (const [index, image] of task.payload.images.entries()) {
-      const blob = dataUrlToBlob(image?.data_url, image?.mime_type)
+      const blob = await resolveEditImageBlob(image, task, index)
       const filename = typeof image?.name === 'string' && image.name.trim() ? image.name.trim() : `edit-source-${index + 1}.png`
       form.append('image', blob, filename)
     }

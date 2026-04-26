@@ -253,6 +253,16 @@ interface ImageEditMask {
   dataUrl: string
 }
 
+interface ImageTaskSourceImage {
+  id?: string
+  name: string
+  mimeType: string
+  dataUrl?: string
+  assetToken?: string
+  image_url?: string
+  remoteUrl?: string
+}
+
 interface PendingImageTask {
   taskId: string
   conversationId: string
@@ -758,40 +768,21 @@ function createLocalEditMaskDataUrl(): string {
   return output.toDataURL('image/png')
 }
 
-async function resolveImageDataUrl(source: string): Promise<{ dataUrl: string; mimeType: string }> {
-  if (source.startsWith('data:')) {
-    return {
-      dataUrl: source,
-      mimeType: mimeTypeFromDataUrl(source)
-    }
-  }
-
-  const response = await fetch(source, { credentials: 'same-origin' })
-  if (!response.ok) {
-    throw new Error(`读取原图失败：HTTP ${response.status}`)
-  }
-  const blob = await response.blob()
-  const dataUrl = await readBlobAsDataUrl(blob)
-  return {
-    dataUrl,
-    mimeType: blob.type || mimeTypeFromDataUrl(dataUrl)
-  }
-}
-
-async function createLocalEditSourceAttachment(image: GeneratedImage): Promise<ChatImageAttachment> {
+function createLocalEditSourceImage(image: GeneratedImage): ImageTaskSourceImage {
   const source = imageFallbackUrl(image) || imageSourceUrl(image)
-  if (!source) {
+  const dataUrl = image.dataUrl?.startsWith('data:') ? image.dataUrl : undefined
+  if (!dataUrl && !image.assetToken && !source && !image.image_url && !image.remoteUrl) {
     throw new Error('这张图片没有可用于局部修改的原图。')
   }
 
-  const resolved = await resolveImageDataUrl(source)
   return {
     id: uid('local-edit-source'),
-    name: buildImageFilename(image.prompt || 'local-edit-source', 1, inferImageExtension(resolved.dataUrl, resolved.mimeType)),
-    mimeType: resolved.mimeType,
-    dataUrl: resolved.dataUrl,
+    name: buildImageFilename(image.prompt || 'local-edit-source', 1, inferImageExtension(dataUrl || source || image.image_url || image.remoteUrl || '')),
+    mimeType: dataUrl ? mimeTypeFromDataUrl(dataUrl) : 'image/png',
+    dataUrl,
     assetToken: image.assetToken,
-    image_url: image.image_url
+    image_url: image.image_url || source,
+    remoteUrl: image.remoteUrl
   }
 }
 
@@ -854,21 +845,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
     }
     reader.onerror = () => reject(new Error('读取图片失败'))
     reader.readAsDataURL(file)
-  })
-}
-
-function readBlobAsDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        resolve(reader.result)
-        return
-      }
-      reject(new Error('读取图片失败'))
-    }
-    reader.onerror = () => reject(new Error('读取图片失败'))
-    reader.readAsDataURL(blob)
   })
 }
 
@@ -1511,7 +1487,7 @@ async function waitForImageTask(
 function buildImageTaskPayload(
   prompt: string,
   size: string,
-  sourceImages: ChatImageAttachment[] = [],
+  sourceImages: ImageTaskSourceImage[] = [],
   conversationId = currentConversationId.value,
   source: 'chat' | 'direct' = 'direct',
   assistantMessageId?: string,
@@ -1543,7 +1519,10 @@ function buildImageTaskPayload(
       images: sourceImages.map((image) => ({
         name: image.name,
         mime_type: image.mimeType,
-        data_url: image.dataUrl
+        ...(image.dataUrl ? { data_url: image.dataUrl } : {}),
+        ...(image.assetToken ? { asset_token: image.assetToken } : {}),
+        ...(image.image_url ? { image_url: image.image_url } : {}),
+        ...(image.remoteUrl ? { remote_url: image.remoteUrl } : {})
       }))
     }
   }
@@ -2113,7 +2092,7 @@ async function handleLocalEditSubmit(): Promise<void> {
 
   try {
     const maskDataUrl = createLocalEditMaskDataUrl()
-    const sourceAttachment = await createLocalEditSourceAttachment(sourceImage)
+    const sourceAttachment = createLocalEditSourceImage(sourceImage)
     const mask: ImageEditMask = {
       name: 'mask.png',
       mimeType: 'image/png',
