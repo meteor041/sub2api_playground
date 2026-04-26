@@ -158,6 +158,7 @@ const libraryFavoriteOnly = ref(false)
 const libraryFolders = ref<LibraryFacet[]>([])
 const libraryTags = ref<LibraryFacet[]>([])
 const libraryFolderMenu = ref<HTMLDetailsElement | null>(null)
+const libraryTagMenu = ref<HTMLDetailsElement | null>(null)
 const librarySelectedIds = ref<string[]>([])
 const libraryBatchFolder = ref('')
 const libraryBatchTags = ref('')
@@ -259,7 +260,7 @@ const selectedImageIndex = computed(() => (
 ))
 
 const canSubmitLocalEdit = computed(() => (
-  Boolean(selectedImage.value) &&
+  Boolean(selectedImage.value || selectedLibraryItem.value) &&
   Boolean(selectedKeySecret.value) &&
   localEditPrompt.value.trim().length > 0 &&
   localEditMaskHasMarks.value &&
@@ -732,7 +733,10 @@ function resetLocalEditMaskCanvas(): void {
 }
 
 async function openLocalEditPanel(): Promise<void> {
-  if (!selectedImage.value || isImageLoading(selectedImage.value)) {
+  if (selectedImage.value && isImageLoading(selectedImage.value)) {
+    return
+  }
+  if (!selectedImage.value && !selectedLibraryItem.value) {
     return
   }
   localEditOpen.value = true
@@ -860,6 +864,41 @@ function createLocalEditSourceImage(image: GeneratedImage): ImageTaskSourceImage
   }
 }
 
+function createLibraryEditSourceImage(item: LibraryItem): ImageTaskSourceImage {
+  const source = item.originalUrl || item.image_url || item.imageUrl || item.thumbnailUrl
+  if (!source) {
+    throw new Error('这张历史图片没有可用于局部修改的原图。')
+  }
+
+  return {
+    id: uid('library-edit-source'),
+    name: buildImageFilename(item.prompt || 'library-edit-source', 1, inferImageExtension(source)),
+    mimeType: 'image/png',
+    image_url: item.image_url || item.originalUrl || item.imageUrl,
+    remoteUrl: item.originalUrl
+  }
+}
+
+function reuseImageParameters(prompt: string, size: string): void {
+  imagePrompt.value = prompt
+  imageSize.value = imageSizes.includes(size) ? size : imageSize.value
+  clearManualImageSource()
+  createMode.value = 'direct'
+  activeView.value = 'create'
+  closeImageModal()
+  setSuccess('已复用这张图片的提示词和尺寸，可直接再次生成。')
+}
+
+function handleReuseSelectedImageParameters(): void {
+  if (selectedImage.value && !isImageLoading(selectedImage.value)) {
+    reuseImageParameters(selectedImage.value.prompt, selectedImage.value.size)
+    return
+  }
+  if (selectedLibraryItem.value) {
+    reuseImageParameters(selectedLibraryItem.value.prompt, selectedLibraryItem.value.size)
+  }
+}
+
 const galleryColumns = computed(() => {
   const columnCount = Math.max(galleryColumnCount.value, 1)
   const columns = Array.from({ length: columnCount }, () => [] as GalleryItem[])
@@ -916,6 +955,10 @@ const libraryFolderFilterSummary = computed(() => (
   libraryFolderFilter.value
     ? libraryFolderLabel(libraryFolderFilter.value === '__none' ? '' : libraryFolderFilter.value)
     : '全部文件夹'
+))
+
+const libraryTagFilterSummary = computed(() => (
+  libraryTagFilter.value ? `#${libraryTagFilter.value}` : '全部标签'
 ))
 
 function triggerDownload(url: string, filename: string): void {
@@ -1439,6 +1482,11 @@ function clearLibraryFilters(): void {
 function setLibraryFolderFilter(value: string): void {
   libraryFolderFilter.value = value
   libraryFolderMenu.value?.removeAttribute('open')
+}
+
+function setLibraryTagFilter(value: string): void {
+  libraryTagFilter.value = value
+  libraryTagMenu.value?.removeAttribute('open')
 }
 
 async function refreshLibrary(): Promise<void> {
@@ -2479,8 +2527,14 @@ function resumePendingImageTasks(): void {
 }
 
 async function handleLocalEditSubmit(): Promise<void> {
-  if (!selectedImage.value || isImageLoading(selectedImage.value)) {
+  if (selectedImage.value && isImageLoading(selectedImage.value)) {
     return
+  }
+  if (!selectedImage.value && !selectedLibraryItem.value) {
+    return
+  }
+  if (!currentConversationId.value) {
+    await startNewConversation()
   }
   if (!currentConversationId.value) {
     setError('请先选择或创建一个会话。')
@@ -2500,14 +2554,17 @@ async function handleLocalEditSubmit(): Promise<void> {
 
   const originConversationId = currentConversationId.value
   const sourceImage = selectedImage.value
-  const size = sourceImage.size || imageSize.value
+  const sourceLibraryImage = selectedLibraryItem.value
+  const size = sourceImage?.size || sourceLibraryImage?.size || imageSize.value
   imageBusy.value = true
   imageTaskLabel.value = '正在创建局部修改任务...'
   let pendingTask: PendingImageTask | null = null
 
   try {
     const maskDataUrl = createLocalEditMaskDataUrl()
-    const sourceAttachment = createLocalEditSourceImage(sourceImage)
+    const sourceAttachment = sourceImage
+      ? createLocalEditSourceImage(sourceImage)
+      : createLibraryEditSourceImage(sourceLibraryImage as LibraryItem)
     const mask: ImageEditMask = {
       name: 'mask.png',
       mimeType: 'image/png',
@@ -2983,12 +3040,35 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </details>
-          <select v-model="libraryTagFilter" title="标签">
-            <option value="">全部标签</option>
-            <option v-for="tag in libraryTags" :key="`tag-${tag.name}`" :value="tag.name">
-              #{{ tag.name }} · {{ tag.count }}
-            </option>
-          </select>
+          <details ref="libraryTagMenu" class="library-filter-menu">
+            <summary :title="libraryTagFilterSummary">
+              <span>{{ libraryTagFilterSummary }}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </summary>
+            <div class="library-filter-menu-list" role="listbox" aria-label="标签筛选">
+              <button
+                class="library-filter-option"
+                :class="{ active: libraryTagFilter === '' }"
+                type="button"
+                @click="setLibraryTagFilter('')"
+              >
+                <span>全部标签</span>
+              </button>
+              <button
+                v-for="tag in libraryTags"
+                :key="`tag-${tag.name}`"
+                class="library-filter-option"
+                :class="{ active: libraryTagFilter === tag.name }"
+                type="button"
+                @click="setLibraryTagFilter(tag.name)"
+              >
+                <span>#{{ tag.name }}</span>
+                <small>{{ tag.count }}</small>
+              </button>
+            </div>
+          </details>
           <button v-if="hasLibraryFilters" class="ghost mini" type="button" @click="clearLibraryFilters">清除筛选</button>
           <span class="library-count">{{ libraryTotal }} 张作品</span>
         </div>
@@ -3674,15 +3754,17 @@ onBeforeUnmount(() => {
       <article class="image-modal-card">
         <button class="modal-close" type="button" aria-label="关闭图片详情" @click="closeImageModal">×</button>
         <div class="modal-image-column">
-          <div class="modal-image-wrap" :class="{ 'local-edit-active': localEditOpen && selectedImage }">
-            <div v-if="selectedImage && localEditOpen" class="local-edit-stage">
+          <div class="modal-image-wrap" :class="{ 'local-edit-active': localEditOpen && (selectedImage || selectedLibraryItem) }">
+            <div v-if="(selectedImage || selectedLibraryItem) && localEditOpen" class="local-edit-stage">
               <img
                 ref="localEditImageElement"
-                :src="imageDownloadUrl(selectedImage)"
-                :alt="selectedImage.prompt"
+                :src="selectedImage ? imageDownloadUrl(selectedImage) : (selectedLibraryItem?.originalUrl || selectedLibraryItem?.image_url || selectedLibraryItem?.imageUrl || '')"
+                :alt="selectedImage?.prompt || selectedLibraryItem?.prompt || ''"
                 loading="lazy"
                 @load="handleLocalEditImageLoad"
-                @error="handleGeneratedImageError($event, selectedImage)"
+                @error="selectedImage
+                  ? handleGeneratedImageError($event, selectedImage)
+                  : (selectedLibraryItem ? handleLibraryImageError($event, selectedLibraryItem) : undefined)"
               />
               <canvas
                 ref="localEditMaskCanvas"
@@ -3706,6 +3788,18 @@ onBeforeUnmount(() => {
                 : (selectedLibraryItem ? handleLibraryImageError($event, selectedLibraryItem) : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined))"
             />
             <div class="modal-actions">
+              <button
+                v-if="selectedImage || selectedLibraryItem"
+                class="icon-button"
+                type="button"
+                aria-label="复用参数再次生成"
+                title="复用参数再次生成"
+                @click="handleReuseSelectedImageParameters"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-2.64-6.36M21 4v6h-6" />
+                </svg>
+              </button>
               <button
                 class="icon-button"
                 type="button"
@@ -3736,7 +3830,7 @@ onBeforeUnmount(() => {
                 </svg>
               </button>
               <button
-                v-if="selectedImage"
+                v-if="selectedImage || selectedLibraryItem"
                 class="icon-button"
                 type="button"
                 :class="{ active: localEditOpen }"
@@ -3774,7 +3868,7 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <form v-if="selectedImage && localEditOpen" class="local-edit-form" @submit.prevent="handleLocalEditSubmit">
+          <form v-if="(selectedImage || selectedLibraryItem) && localEditOpen" class="local-edit-form" @submit.prevent="handleLocalEditSubmit">
             <div class="local-edit-toolbar">
               <label class="local-edit-brush-control">
                 <span>画笔</span>
