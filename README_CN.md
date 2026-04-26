@@ -285,6 +285,8 @@ CI 会在 `push main` 和 `pull_request` 时执行：
 
 CD 采用手动触发的 `workflow_dispatch`，避免每次 push 自动发版。它会先在 GitHub Runner 上做一次构建校验，再通过 SSH 登录服务器执行部署。
 
+当前 workflow 使用 `actions/checkout@v6` 和 `actions/setup-node@v6`，以兼容 GitHub Actions 对 Node 24 runtime 的迁移。
+
 你需要在 GitHub 仓库或 `production` environment 里配置这些 secrets：
 
 - `DEPLOY_HOST`
