@@ -705,9 +705,12 @@ function localEditCanvasPoint(event: PointerEvent): { x: number; y: number } | n
 }
 
 function prepareLocalEditMaskContext(context: CanvasRenderingContext2D): void {
+  const canvas = localEditMaskCanvas.value
+  const rect = canvas?.getBoundingClientRect()
+  const scale = canvas && rect && rect.width > 0 ? canvas.width / rect.width : 1
   context.lineCap = 'round'
   context.lineJoin = 'round'
-  context.lineWidth = localEditBrushSize.value
+  context.lineWidth = localEditBrushSize.value * scale
   context.strokeStyle = '#ff4f2e'
 }
 
