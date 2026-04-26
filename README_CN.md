@@ -283,7 +283,7 @@ CI 会在 `push main` 和 `pull_request` 时执行：
 - `npm run build`
 - `docker build .`
 
-CD 采用手动触发的 `workflow_dispatch`，避免每次 push 自动发版。它会先在 GitHub Runner 上做一次构建校验，再通过 SSH 登录服务器执行部署。
+CD 会在 `push main` 后自动部署，同时保留 `workflow_dispatch` 手动触发入口。它会先在 GitHub Runner 上做一次构建校验，再通过 SSH 登录服务器执行部署。
 
 当前 workflow 使用 `actions/checkout@v6` 和 `actions/setup-node@v6`，以兼容 GitHub Actions 对 Node 24 runtime 的迁移。
 
@@ -310,6 +310,8 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
   sleep 3
 done
 ```
+
+自动触发时，`REF` 就是这次 push 到 `main` 的提交；手动触发时，`REF` 使用你在 GitHub Actions 页面填写的值。
 
 运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地，不要提交到仓库。推荐在服务器项目根目录维护一个未纳入 Git 的 `.deploy.env`，供 deploy workflow 使用。
 
