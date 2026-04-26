@@ -118,6 +118,7 @@ const isAuthenticated = ref(hasAuthToken())
 const activeView = ref<'gallery' | 'create'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
 const themeMode = ref<'light' | 'dark'>('light')
+const toastAutoCloseMs = 5000
 const sessionsCollapsed = ref(false)
 const imagesPanelOpen = ref(false)
 const mainSidebarCollapsed = ref(false)
@@ -139,6 +140,7 @@ const galleryColumnCount = ref(4)
 const isMobileViewport = ref(false)
 const gallerySentinel = ref<HTMLElement | null>(null)
 let galleryObserver: IntersectionObserver | null = null
+let toastTimer: number | null = null
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -881,14 +883,38 @@ async function createChatImageAttachment(file: File): Promise<ChatImageAttachmen
   }
 }
 
+function clearToastTimer(): void {
+  if (toastTimer != null) {
+    window.clearTimeout(toastTimer)
+    toastTimer = null
+  }
+}
+
+function closeToast(): void {
+  clearToastTimer()
+  errorMessage.value = ''
+  successMessage.value = ''
+}
+
+function scheduleToastAutoClose(): void {
+  clearToastTimer()
+  toastTimer = window.setTimeout(() => {
+    errorMessage.value = ''
+    successMessage.value = ''
+    toastTimer = null
+  }, toastAutoCloseMs)
+}
+
 function setError(message: string): void {
   errorMessage.value = message
   successMessage.value = ''
+  scheduleToastAutoClose()
 }
 
 function setSuccess(message: string): void {
   successMessage.value = message
   errorMessage.value = ''
+  scheduleToastAutoClose()
 }
 
 function applyThemeMode(mode: 'light' | 'dark'): void {
@@ -2341,6 +2367,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  clearToastTimer()
   galleryObserver?.disconnect()
   window.removeEventListener('resize', syncViewportLayout)
 })
@@ -3242,7 +3269,7 @@ onBeforeUnmount(() => {
 
     <div v-if="errorMessage" class="toast error" role="alert">
       <span>{{ errorMessage }}</span>
-      <button class="toast-close" type="button" aria-label="关闭错误提示" @click="errorMessage = ''">
+      <button class="toast-close" type="button" aria-label="关闭错误提示" @click="closeToast">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M6 6l12 12M18 6 6 18" />
         </svg>
@@ -3250,7 +3277,7 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="successMessage" class="toast success" role="status">
       <span>{{ successMessage }}</span>
-      <button class="toast-close" type="button" aria-label="关闭成功提示" @click="successMessage = ''">
+      <button class="toast-close" type="button" aria-label="关闭成功提示" @click="closeToast">
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M6 6l12 12M18 6 6 18" />
         </svg>
