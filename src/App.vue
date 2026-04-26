@@ -2697,9 +2697,11 @@ onMounted(async () => {
   window.addEventListener('resize', syncViewportLayout)
 
   if (ENABLE_MOCK) {
+    const loginResult = await login('mock@example.com', 'mock')
     isAuthenticated.value = true
     activeView.value = 'create'
-    profile.value = { id: 1, email: 'test@example.com', username: 'MockUser', role: 'user', status: 'active', balance: 9.52, concurrency: 5 }
+    await refreshWorkspace()
+    profile.value = loginResult.user || profile.value || { id: 1, email: 'test@example.com', username: 'MockUser', role: 'user', status: 'active', balance: 9.52, concurrency: 5 }
     const mockConv = { id: 'mock-conv-1', title: '霓虹科幻场景', createdAt: new Date(Date.now() - 3600000).toISOString(), updatedAt: new Date().toISOString(), lastMessageAt: new Date().toISOString() }
     conversations.value = [mockConv]
     currentConversationId.value = mockConv.id
