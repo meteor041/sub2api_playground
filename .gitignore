@@ -4,6 +4,9 @@ dist/
 .env.local
 .env.*.local
 *.local
+.backup.env
+backup.env
+backups/
 *.tsbuildinfo
 npm-debug.log*
 yarn-debug.log*

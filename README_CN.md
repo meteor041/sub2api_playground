@@ -210,6 +210,52 @@ npm run migrate:r2 -- --dry-run
 npm run migrate:r2 -- --concurrency=8
 ```
 
+## 定时备份
+
+生产环境至少要同时备份两部分：
+
+- PostgreSQL
+- `PLAYGROUND_DATA_DIR` 对应的数据目录
+
+仓库内置了两个脚本：
+
+- [scripts/backup-playground.sh](/root/sub2api_playground/scripts/backup-playground.sh)
+- [scripts/restore-playground.sh](/root/sub2api_playground/scripts/restore-playground.sh)
+
+先在项目根目录创建一个未提交的 `.backup.env`：
+
+```bash
+POSTGRES_CONTAINER=sub2api_postgres
+POSTGRES_DB=sub2api_playground
+POSTGRES_USER=neondb_owner
+POSTGRES_PASSWORD=your-real-password
+PLAYGROUND_DATA_DIR=/root/sub2api_playground/data/playground
+BACKUP_ROOT=/root/sub2api_playground/backups/playground
+RETENTION_DAYS=7
+```
+
+手动执行一次备份：
+
+```bash
+cd /root/sub2api_playground
+bash scripts/backup-playground.sh
+```
+
+恢复时先确认目标服务已经停写，再执行。恢复脚本会先清空目标数据库的 `public` schema，再导入备份：
+
+```bash
+cd /root/sub2api_playground
+bash scripts/restore-playground.sh 20260427-021500
+```
+
+可以用 `cron` 每天凌晨 3 点跑一次：
+
+```bash
+0 3 * * * cd /root/sub2api_playground && /usr/bin/bash scripts/backup-playground.sh >> /var/log/sub2api-playground-backup.log 2>&1
+```
+
+首次接入后，至少实际做一次恢复演练，确认数据库和 `data/playground` 都能完整恢复。
+
 ## 域名代理
 
 如果你要使用 `playground.example.com`，可以在反向代理或 Cloudflare Tunnel 中把它指向 `http://127.0.0.1:8081`。
@@ -222,6 +268,42 @@ npm run migrate:r2 -- --concurrency=8
 在 Cloudflare Tunnel 场景下，通常不需要额外开放 `8081` 入站端口。
 
 如果你要直接暴露 `8081`，记得同时在服务器防火墙和云服务安全组中放行 TCP `8081`。
+
+## CI/CD
+
+仓库现在可以按 GitHub Actions 的最小方案接入：
+
+- CI: [.github/workflows/ci.yml](/root/sub2api_playground/.github/workflows/ci.yml)
+- CD: [.github/workflows/deploy.yml](/root/sub2api_playground/.github/workflows/deploy.yml)
+
+CI 会在 `push main` 和 `pull_request` 时执行：
+
+- `npm ci`
+- `npm run typecheck`
+- `npm run build`
+- `docker build .`
+
+CD 采用手动触发的 `workflow_dispatch`，避免每次 push 自动发版。它会先在 GitHub Runner 上做一次构建校验，再通过 SSH 登录服务器执行部署。
+
+你需要在 GitHub 仓库或 `production` environment 里配置这些 secrets：
+
+- `DEPLOY_HOST`
+- `DEPLOY_USER`
+- `DEPLOY_PATH`
+- `DEPLOY_SSH_KEY`
+
+部署 workflow 默认会在服务器执行：
+
+```bash
+cd "$DEPLOY_PATH"
+git fetch --tags origin
+git fetch origin "$REF"
+git checkout --force FETCH_HEAD
+docker compose -f docker-compose.host.example.yml up -d --build --force-recreate
+curl -fsS http://127.0.0.1:8081/health
+```
+
+运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地，不要放进 GitHub Actions secrets 里代替整套运行环境。
 
 ## 说明
 
