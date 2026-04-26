@@ -66,6 +66,28 @@ interface MockGalleryItem {
   createdAt: string
 }
 
+interface MockLibraryFacet {
+  name: string
+  count: number
+}
+
+interface MockLibraryItem {
+  id: string
+  prompt: string
+  size: string
+  image_url: string
+  imageUrl: string
+  thumbnailUrl: string
+  originalUrl: string
+  sourceConversationId: string
+  sourceImageId: string
+  folder: string
+  tags: string[]
+  favorite: boolean
+  createdAt: string
+  updatedAt: string
+}
+
 interface MockTaskPayload extends JsonRecord {
   mode: 'generate' | 'edit'
   prompt: string
@@ -128,6 +150,8 @@ let apiKeys: MockApiKey[] = [
 const conversations = new Map<string, MockConversation>()
 const tasks = new Map<string, MockTask>()
 const galleryItems: MockGalleryItem[] = seedGalleryItems()
+const libraryItems: MockLibraryItem[] = seedLibraryItems()
+const deletedLibrarySources = new Set<string>()
 
 function createMockApiKey(name: string): MockApiKey {
   const id = apiKeySequence
@@ -297,6 +321,33 @@ async function handleMockRequest(
     return true
   }
 
+  if (method === 'GET' && url.pathname === '/api/playground/library') {
+    requireMockAuth(req)
+    sendJson(res, 200, envelope(listMockLibraryItems(url)))
+    return true
+  }
+
+  if (method === 'POST' && url.pathname === '/api/playground/library/batch') {
+    requireMockAuth(req)
+    const body = await readJsonBody(req)
+    sendJson(res, 200, envelope(batchUpdateMockLibraryItems(body)))
+    return true
+  }
+
+  const libraryItemId = matchPath(url.pathname, '/api/playground/library/')
+  if (libraryItemId && method === 'PATCH') {
+    requireMockAuth(req)
+    const body = await readJsonBody(req)
+    sendJson(res, 200, envelope(updateMockLibraryItem(libraryItemId, body)))
+    return true
+  }
+
+  if (libraryItemId && method === 'DELETE') {
+    requireMockAuth(req)
+    sendJson(res, 200, envelope(deleteMockLibraryItems([libraryItemId])))
+    return true
+  }
+
   if (method === 'GET' && url.pathname === '/api/playground/conversations') {
     requireMockAuth(req)
     sendJson(res, 200, envelope(Array.from(conversations.values()).map(summarizeConversation).sort(sortByUpdatedDesc)))
@@ -332,6 +383,7 @@ async function handleMockRequest(
       chatMessages: Array.isArray(body.chatMessages) ? body.chatMessages as JsonRecord[] : [],
       generatedImages: Array.isArray(body.generatedImages) ? body.generatedImages as JsonRecord[] : []
     }
+    upsertMockLibraryFromConversation(conversation)
     touchConversation(conversation)
     sendJson(res, 200, envelope({
       savedAt: conversation.updatedAt,
@@ -788,6 +840,7 @@ function archiveTaskToConversation(task: MockTask): void {
   }
 
   task.archived = true
+  upsertMockLibraryFromConversation(conversation)
   touchConversation(conversation)
 }
 
@@ -853,6 +906,201 @@ function shareMockGalleryImage(body: JsonRecord): JsonRecord {
   }
 }
 
+function normalizeMockFolder(value: unknown): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 64)
+}
+
+function normalizeMockTags(value: unknown): string[] {
+  const rawTags = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? value.split(/[,\n，]+/) : [])
+  const tags: string[] = []
+  const seen = new Set<string>()
+  for (const rawTag of rawTags) {
+    const tag = String(rawTag || '').trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 32)
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= 20) {
+      break
+    }
+  }
+  return tags
+}
+
+function librarySourceKey(conversationId: string, imageId: string): string {
+  return `${conversationId}:${imageId}`
+}
+
+function upsertMockLibraryFromConversation(conversation: MockConversation): void {
+  for (const image of conversation.state.generatedImages) {
+    const sourceImageId = pickString(image.id)
+    const source = pickString(image.image_url) || pickString(image.dataUrl) || pickString(image.remoteUrl)
+    if (!sourceImageId || !source || deletedLibrarySources.has(librarySourceKey(conversation.id, sourceImageId))) {
+      continue
+    }
+
+    const existing = libraryItems.find((item) => (
+      item.sourceConversationId === conversation.id &&
+      item.sourceImageId === sourceImageId
+    ))
+    if (existing) {
+      existing.prompt = pickString(image.prompt) || existing.prompt
+      existing.size = pickString(image.size) || existing.size
+      existing.image_url = source
+      existing.imageUrl = source
+      existing.thumbnailUrl = source
+      existing.originalUrl = source
+      continue
+    }
+
+    const createdAt = Number.isFinite(Number(image.createdAt))
+      ? new Date(Number(image.createdAt)).toISOString()
+      : nowIso()
+    libraryItems.unshift({
+      id: randomUUID(),
+      prompt: pickString(image.prompt) || 'Mock library image',
+      size: pickString(image.size) || '1024x1024',
+      image_url: source,
+      imageUrl: source,
+      thumbnailUrl: source,
+      originalUrl: source,
+      sourceConversationId: conversation.id,
+      sourceImageId,
+      folder: '',
+      tags: [],
+      favorite: false,
+      createdAt,
+      updatedAt: createdAt
+    })
+  }
+}
+
+function buildMockFacets(items: MockLibraryItem[], key: 'folder' | 'tags'): MockLibraryFacet[] {
+  const counts = new Map<string, number>()
+  for (const item of items) {
+    const values = key === 'folder' ? [item.folder] : item.tags
+    for (const value of values) {
+      counts.set(value, (counts.get(value) || 0) + 1)
+    }
+  }
+  return Array.from(counts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+}
+
+function listMockLibraryItems(url: URL): JsonRecord {
+  const limit = clampInt(url.searchParams.get('limit'), 24, 1, 60)
+  const offset = clampInt(url.searchParams.get('offset'), 0, 0, libraryItems.length)
+  const query = (url.searchParams.get('q') || '').trim().toLowerCase()
+  const folderParam = url.searchParams.has('folder') ? String(url.searchParams.get('folder') || '') : ''
+  const hasFolderFilter = url.searchParams.has('folder')
+  const folder = folderParam === '__none' ? '' : normalizeMockFolder(folderParam)
+  const tag = normalizeMockTags([url.searchParams.get('tag') || ''])[0] || ''
+  const favoriteOnly = url.searchParams.get('favorite') === '1'
+  const filtered = libraryItems.filter((item) => {
+    const haystack = [
+      item.prompt,
+      item.size,
+      item.folder,
+      item.sourceImageId,
+      ...item.tags
+    ].join(' ').toLowerCase()
+    return (!query || haystack.includes(query)) &&
+      (!hasFolderFilter || item.folder === folder) &&
+      (!tag || item.tags.some((itemTag) => itemTag.toLowerCase() === tag.toLowerCase())) &&
+      (!favoriteOnly || item.favorite)
+  }).sort((left, right) => (
+    Number(right.favorite) - Number(left.favorite) ||
+    Date.parse(right.createdAt) - Date.parse(left.createdAt)
+  ))
+  const items = filtered.slice(offset, offset + limit)
+  const nextOffset = offset + items.length < filtered.length ? offset + items.length : null
+  return {
+    items,
+    nextOffset,
+    hasMore: nextOffset !== null,
+    folders: buildMockFacets(libraryItems, 'folder'),
+    tags: buildMockFacets(libraryItems, 'tags'),
+    total: filtered.length
+  }
+}
+
+function updateMockLibraryItem(itemId: string, body: JsonRecord): MockLibraryItem {
+  const item = libraryItems.find((candidate) => candidate.id === itemId)
+  if (!item) {
+    throw httpError(404, 'Library item not found')
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'folder')) {
+    item.folder = normalizeMockFolder(body.folder)
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'tags')) {
+    item.tags = normalizeMockTags(body.tags)
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'favorite')) {
+    item.favorite = Boolean(body.favorite)
+  }
+  item.updatedAt = nowIso()
+  return item
+}
+
+function deleteMockLibraryItems(ids: string[]): JsonRecord {
+  let updated = 0
+  for (const id of ids) {
+    const index = libraryItems.findIndex((item) => item.id === id)
+    if (index < 0) {
+      continue
+    }
+    const [item] = libraryItems.splice(index, 1)
+    deletedLibrarySources.add(librarySourceKey(item.sourceConversationId, item.sourceImageId))
+    updated += 1
+  }
+  return { updated }
+}
+
+function batchUpdateMockLibraryItems(body: JsonRecord): JsonRecord {
+  const ids = Array.isArray(body.ids) ? body.ids.map((id) => String(id)) : []
+  const action = typeof body.action === 'string' ? body.action : ''
+  const targets = libraryItems.filter((item) => ids.includes(item.id))
+  if (action === 'delete') {
+    return deleteMockLibraryItems(ids)
+  }
+  if (action === 'favorite' || action === 'unfavorite') {
+    for (const item of targets) {
+      item.favorite = action === 'favorite'
+      item.updatedAt = nowIso()
+    }
+    return { updated: targets.length }
+  }
+  if (action === 'move') {
+    const folder = normalizeMockFolder(body.folder)
+    for (const item of targets) {
+      item.folder = folder
+      item.updatedAt = nowIso()
+    }
+    return { updated: targets.length }
+  }
+  if (action === 'add_tags' || action === 'remove_tags' || action === 'set_tags') {
+    const tags = normalizeMockTags(body.tags)
+    for (const item of targets) {
+      if (action === 'set_tags') {
+        item.tags = tags
+      } else if (action === 'add_tags') {
+        item.tags = normalizeMockTags([...item.tags, ...tags])
+      } else {
+        const removeSet = new Set(tags.map((tag) => tag.toLowerCase()))
+        item.tags = item.tags.filter((tag) => !removeSet.has(tag.toLowerCase()))
+      }
+      item.updatedAt = nowIso()
+    }
+    return { updated: targets.length }
+  }
+  throw httpError(400, 'Unsupported library batch action')
+}
+
 function pickString(value: unknown): string {
   return typeof value === 'string' && value.trim() ? value.trim() : ''
 }
@@ -888,6 +1136,53 @@ function seedGalleryItems(): MockGalleryItem[] {
       sharedByUserId: mockUser.id,
       sharedByName: mockUser.username,
       createdAt: new Date(Date.now() - index * 60 * 60 * 1000).toISOString()
+    }
+  })
+}
+
+function seedLibraryItems(): MockLibraryItem[] {
+  const seeds = [
+    {
+      prompt: 'MOCK 私人角色设定，银白短发的未来侦探',
+      size: '1024x1536',
+      folder: '角色设计',
+      tags: ['角色', '科幻'],
+      favorite: true
+    },
+    {
+      prompt: 'MOCK 产品主视觉，透明外壳耳机和冷白背景',
+      size: '1536x1024',
+      folder: '商业视觉',
+      tags: ['产品', '海报'],
+      favorite: false
+    },
+    {
+      prompt: 'MOCK 建筑概念图，山谷中的玻璃美术馆',
+      size: '1408x1056',
+      folder: '',
+      tags: ['建筑', '概念'],
+      favorite: false
+    }
+  ]
+
+  return seeds.map((seed, index) => {
+    const source = createMockImageDataUrl(seed.prompt, seed.size, 'MOCK LIBRARY')
+    const createdAt = new Date(Date.now() - index * 45 * 60 * 1000).toISOString()
+    return {
+      id: randomUUID(),
+      prompt: seed.prompt,
+      size: seed.size,
+      image_url: source,
+      imageUrl: source,
+      thumbnailUrl: source,
+      originalUrl: source,
+      sourceConversationId: 'mock-library',
+      sourceImageId: `mock-library-image-${index + 1}`,
+      folder: seed.folder,
+      tags: seed.tags,
+      favorite: seed.favorite,
+      createdAt,
+      updatedAt: createdAt
     }
   })
 }

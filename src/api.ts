@@ -6,6 +6,10 @@ import type {
   GalleryItem,
   Group,
   ImageTaskStatus,
+  LibraryBatchAction,
+  LibraryBatchResponse,
+  LibraryItem,
+  LibraryPage,
   LoginResponse,
   PaginatedResponse,
   ShareGalleryResponse,
@@ -366,6 +370,60 @@ export function shareGalleryImage(payload: {
       asset_token: payload.assetToken || null,
       remote_url: payload.remoteUrl || null
     })
+  })
+}
+
+export function listLibraryItems(params: {
+  offset?: number
+  limit?: number
+  query?: string
+  folder?: string
+  tag?: string
+  favorite?: boolean
+} = {}): Promise<LibraryPage> {
+  const searchParams = new URLSearchParams()
+  searchParams.set('offset', String(params.offset || 0))
+  searchParams.set('limit', String(params.limit || 24))
+  if (params.query?.trim()) {
+    searchParams.set('q', params.query.trim())
+  }
+  if (typeof params.folder === 'string' && params.folder.trim()) {
+    searchParams.set('folder', params.folder.trim())
+  }
+  if (params.tag?.trim()) {
+    searchParams.set('tag', params.tag.trim())
+  }
+  if (params.favorite) {
+    searchParams.set('favorite', '1')
+  }
+  return request<LibraryPage>(`/api/playground/library?${searchParams.toString()}`)
+}
+
+export function updateLibraryItem(
+  itemId: string,
+  payload: { folder?: string; tags?: string[]; favorite?: boolean }
+): Promise<LibraryItem> {
+  return request<LibraryItem>(`/api/playground/library/${encodeURIComponent(itemId)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function deleteLibraryItem(itemId: string): Promise<LibraryBatchResponse> {
+  return request<LibraryBatchResponse>(`/api/playground/library/${encodeURIComponent(itemId)}`, {
+    method: 'DELETE'
+  })
+}
+
+export function batchUpdateLibraryItems(payload: {
+  ids: string[]
+  action: LibraryBatchAction
+  folder?: string
+  tags?: string[]
+}): Promise<LibraryBatchResponse> {
+  return request<LibraryBatchResponse>('/api/playground/library/batch', {
+    method: 'POST',
+    body: JSON.stringify(payload)
   })
 }
 

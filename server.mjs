@@ -186,6 +186,54 @@ async function ensureRuntime() {
   `)
 
   await db.query(`
+    CREATE TABLE IF NOT EXISTS playground_library_items (
+      id UUID PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      asset_token UUID,
+      remote_url TEXT,
+      prompt TEXT NOT NULL DEFAULT '',
+      size TEXT NOT NULL DEFAULT 'unknown',
+      source_conversation_id UUID,
+      source_image_id TEXT,
+      folder TEXT NOT NULL DEFAULT '',
+      tags TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[],
+      favorite BOOLEAN NOT NULL DEFAULT FALSE,
+      deleted_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      CONSTRAINT playground_library_items_image_source CHECK (asset_token IS NOT NULL OR remote_url IS NOT NULL)
+    )
+  `)
+
+  await db.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_playground_library_source
+    ON playground_library_items (user_id, source_conversation_id, source_image_id)
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_library_user_updated
+    ON playground_library_items (user_id, updated_at DESC)
+    WHERE deleted_at IS NULL
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_library_user_created
+    ON playground_library_items (user_id, created_at DESC)
+    WHERE deleted_at IS NULL
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_library_user_favorite
+    ON playground_library_items (user_id, favorite, created_at DESC)
+    WHERE deleted_at IS NULL
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_library_tags
+    ON playground_library_items USING GIN (tags)
+  `)
+
+  await db.query(`
     CREATE TABLE IF NOT EXISTS playground_image_tasks (
       id UUID PRIMARY KEY,
       user_id BIGINT NOT NULL,
@@ -1700,11 +1748,328 @@ async function saveConversationState(userId, conversationId, state) {
      WHERE id = $1 AND user_id = $2`,
     [conversationId, userId, title, lastMessageAt]
   )
+  await upsertLibraryItemsForConversation(userId, conversationId, normalizedSnapshot.generatedImages || [])
 
   return {
     savedAt: nowIso(),
     title
   }
+}
+
+function normalizeLibraryFolder(value) {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 64)
+}
+
+function normalizeLibraryTags(value) {
+  const rawTags = Array.isArray(value)
+    ? value
+    : (typeof value === 'string' ? value.split(/[,\n，]+/) : [])
+  const tags = []
+  const seen = new Set()
+  for (const rawTag of rawTags) {
+    const tag = String(rawTag || '').trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 32)
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= 20) {
+      break
+    }
+  }
+  return tags
+}
+
+function normalizeLibraryIds(value) {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+  if (!Array.isArray(value)) {
+    return []
+  }
+  const ids = []
+  const seen = new Set()
+  for (const item of value) {
+    const id = String(item || '').trim()
+    if (!uuidPattern.test(id) || seen.has(id)) {
+      continue
+    }
+    seen.add(id)
+    ids.push(id)
+    if (ids.length >= 200) {
+      break
+    }
+  }
+  return ids
+}
+
+function mapLibraryRow(row, req) {
+  const originalUrl = row.asset_token ? assetPublicUrl(row.asset_token) : row.remote_url
+  const thumbnailUrl = row.asset_token ? cloudflareImageUrl(req, originalUrl) : originalUrl
+  return {
+    id: row.id,
+    prompt: row.prompt,
+    size: row.size,
+    image_url: resolveImageUrl(row.asset_token, row.remote_url),
+    imageUrl: thumbnailUrl,
+    thumbnailUrl,
+    originalUrl,
+    sourceConversationId: row.source_conversation_id || undefined,
+    sourceImageId: row.source_image_id || undefined,
+    folder: row.folder || '',
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    favorite: Boolean(row.favorite),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  }
+}
+
+async function upsertLibraryItemsForConversation(userId, conversationId, images) {
+  if (!Array.isArray(images) || images.length === 0) {
+    return
+  }
+  const pool = requireDb()
+  for (const image of images) {
+    const sourceImageId = typeof image?.id === 'string' ? image.id.trim() : ''
+    const assetToken = typeof image?.assetToken === 'string' && image.assetToken.trim()
+      ? image.assetToken.trim()
+      : null
+    const remoteUrl = typeof image?.remoteUrl === 'string' && image.remoteUrl.trim()
+      ? image.remoteUrl.trim()
+      : null
+    if (!sourceImageId || (!assetToken && !remoteUrl)) {
+      continue
+    }
+
+    await pool.query(
+      `INSERT INTO playground_library_items (
+         id, user_id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+         created_at, updated_at
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz, NOW())
+       ON CONFLICT (user_id, source_conversation_id, source_image_id)
+       DO UPDATE SET
+         asset_token = EXCLUDED.asset_token,
+         remote_url = EXCLUDED.remote_url,
+         prompt = EXCLUDED.prompt,
+         size = EXCLUDED.size`,
+      [
+        randomUUID(),
+        userId,
+        assetToken,
+        remoteUrl,
+        typeof image.prompt === 'string' && image.prompt.trim() ? image.prompt.trim() : 'Untitled prompt',
+        typeof image.size === 'string' && image.size.trim() ? image.size.trim() : 'unknown',
+        conversationId,
+        sourceImageId,
+        Number.isFinite(Number(image.createdAt)) ? new Date(Number(image.createdAt)).toISOString() : nowIso()
+      ]
+    )
+  }
+}
+
+function libraryFilterFromSearchParams(searchParams) {
+  const folderParam = searchParams.has('folder') ? String(searchParams.get('folder') || '') : null
+  return {
+    query: String(searchParams.get('q') || '').trim().slice(0, 120),
+    folder: folderParam === null
+      ? null
+      : (folderParam === '__none' ? '' : normalizeLibraryFolder(folderParam)),
+    tag: normalizeLibraryTags([searchParams.get('tag') || ''])[0] || '',
+    favorite: searchParams.get('favorite') === '1'
+  }
+}
+
+function libraryWhereClause(filters) {
+  return `
+    WHERE user_id = $1
+      AND deleted_at IS NULL
+      AND (
+        $2::text = ''
+        OR prompt ILIKE '%' || $2 || '%'
+        OR size ILIKE '%' || $2 || '%'
+        OR folder ILIKE '%' || $2 || '%'
+        OR source_image_id ILIKE '%' || $2 || '%'
+        OR EXISTS (
+          SELECT 1
+          FROM unnest(tags) AS tag_name
+          WHERE tag_name ILIKE '%' || $2 || '%'
+        )
+      )
+      AND ($3::text IS NULL OR folder = $3)
+      AND ($4::text = '' OR EXISTS (
+        SELECT 1
+        FROM unnest(tags) AS tag_name
+        WHERE lower(tag_name) = lower($4)
+      ))
+      AND ($5::boolean = FALSE OR favorite = TRUE)
+  `
+}
+
+async function listLibraryItems(req, user, searchParams) {
+  const pool = requireDb()
+  const safeLimit = Math.min(Math.max(Number.parseInt(String(searchParams.get('limit') || '24'), 10) || 24, 1), 60)
+  const safeOffset = Math.max(Number.parseInt(String(searchParams.get('offset') || '0'), 10) || 0, 0)
+  const filters = libraryFilterFromSearchParams(searchParams)
+  const filterValues = [user.id, filters.query, filters.folder, filters.tag, filters.favorite]
+  const where = libraryWhereClause(filters)
+
+  const [itemsResult, countResult, foldersResult, tagsResult] = await Promise.all([
+    pool.query(
+      `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+              folder, tags, favorite, created_at, updated_at
+       FROM playground_library_items
+       ${where}
+       ORDER BY favorite DESC, created_at DESC
+       LIMIT $6 OFFSET $7`,
+      [...filterValues, safeLimit + 1, safeOffset]
+    ),
+    pool.query(
+      `SELECT COUNT(*)::int AS total
+       FROM playground_library_items
+       ${where}`,
+      filterValues
+    ),
+    pool.query(
+      `SELECT folder AS name, COUNT(*)::int AS count
+       FROM playground_library_items
+       WHERE user_id = $1 AND deleted_at IS NULL
+       GROUP BY folder
+       ORDER BY count DESC, folder ASC`,
+      [user.id]
+    ),
+    pool.query(
+      `SELECT tag_name AS name, COUNT(*)::int AS count
+       FROM playground_library_items, unnest(tags) AS tag_name
+       WHERE user_id = $1 AND deleted_at IS NULL
+       GROUP BY tag_name
+       ORDER BY count DESC, tag_name ASC`,
+      [user.id]
+    )
+  ])
+
+  const rows = itemsResult.rows.slice(0, safeLimit)
+  return {
+    items: rows.map((row) => mapLibraryRow(row, req)),
+    nextOffset: itemsResult.rows.length > safeLimit ? safeOffset + rows.length : null,
+    hasMore: itemsResult.rows.length > safeLimit,
+    folders: foldersResult.rows.map((row) => ({ name: row.name || '', count: Number(row.count) || 0 })),
+    tags: tagsResult.rows.map((row) => ({ name: row.name, count: Number(row.count) || 0 })),
+    total: Number(countResult.rows[0]?.total) || 0
+  }
+}
+
+async function updateLibraryItem(user, itemId, body) {
+  const updates = []
+  const values = [itemId, user.id]
+
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'folder')) {
+    values.push(normalizeLibraryFolder(body.folder))
+    updates.push(`folder = $${values.length}`)
+  }
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'tags')) {
+    values.push(normalizeLibraryTags(body.tags))
+    updates.push(`tags = $${values.length}::text[]`)
+  }
+  if (Object.prototype.hasOwnProperty.call(body || {}, 'favorite')) {
+    values.push(Boolean(body.favorite))
+    updates.push(`favorite = $${values.length}`)
+  }
+
+  if (updates.length === 0) {
+    throw appError(400, 'No library fields to update')
+  }
+
+  const pool = requireDb()
+  const result = await pool.query(
+    `UPDATE playground_library_items
+     SET ${updates.join(', ')}, updated_at = NOW()
+     WHERE id = $1 AND user_id = $2 AND deleted_at IS NULL
+     RETURNING id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
+               folder, tags, favorite, created_at, updated_at`,
+    values
+  )
+  if (!result.rows[0]) {
+    throw appError(404, 'Library item not found')
+  }
+  return mapLibraryRow(result.rows[0], { headers: {} })
+}
+
+async function deleteLibraryItems(user, ids) {
+  const normalizedIds = normalizeLibraryIds(ids)
+  if (normalizedIds.length === 0) {
+    throw appError(400, 'No valid library item IDs')
+  }
+  const pool = requireDb()
+  const result = await pool.query(
+    `UPDATE playground_library_items
+     SET deleted_at = NOW(), updated_at = NOW()
+     WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+    [user.id, normalizedIds]
+  )
+  return { updated: result.rowCount || 0 }
+}
+
+async function batchUpdateLibraryItems(user, body) {
+  const ids = normalizeLibraryIds(body?.ids)
+  if (ids.length === 0) {
+    throw appError(400, 'No valid library item IDs')
+  }
+
+  const action = String(body?.action || '')
+  const pool = requireDb()
+  if (action === 'delete') {
+    return deleteLibraryItems(user, ids)
+  }
+  if (action === 'favorite' || action === 'unfavorite') {
+    const result = await pool.query(
+      `UPDATE playground_library_items
+       SET favorite = $3, updated_at = NOW()
+       WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+      [user.id, ids, action === 'favorite']
+    )
+    return { updated: result.rowCount || 0 }
+  }
+  if (action === 'move') {
+    const folder = normalizeLibraryFolder(body?.folder)
+    const result = await pool.query(
+      `UPDATE playground_library_items
+       SET folder = $3, updated_at = NOW()
+       WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+      [user.id, ids, folder]
+    )
+    return { updated: result.rowCount || 0 }
+  }
+  if (action === 'set_tags' || action === 'add_tags' || action === 'remove_tags') {
+    const incomingTags = normalizeLibraryTags(body?.tags)
+    if ((action === 'add_tags' || action === 'remove_tags') && incomingTags.length === 0) {
+      throw appError(400, 'tags are required')
+    }
+    const current = await pool.query(
+      `SELECT id, tags
+       FROM playground_library_items
+       WHERE user_id = $1 AND id = ANY($2::uuid[]) AND deleted_at IS NULL`,
+      [user.id, ids]
+    )
+    for (const row of current.rows) {
+      const currentTags = normalizeLibraryTags(row.tags || [])
+      let nextTags = incomingTags
+      if (action === 'add_tags') {
+        nextTags = normalizeLibraryTags([...currentTags, ...incomingTags])
+      } else if (action === 'remove_tags') {
+        const removeSet = new Set(incomingTags.map((tag) => tag.toLowerCase()))
+        nextTags = currentTags.filter((tag) => !removeSet.has(tag.toLowerCase()))
+      }
+      await pool.query(
+        `UPDATE playground_library_items
+         SET tags = $3::text[], updated_at = NOW()
+         WHERE user_id = $1 AND id = $2 AND deleted_at IS NULL`,
+        [user.id, row.id, nextTags]
+      )
+    }
+    return { updated: current.rows.length }
+  }
+
+  throw appError(400, 'Unsupported library batch action')
 }
 
 function mapGalleryRow(row, req) {
@@ -1931,6 +2296,38 @@ const server = createServer(async (req, res) => {
       const body = await parseJsonBody(req)
       const result = await shareGalleryImage(user, body)
       json(res, result.alreadyExists ? 200 : 201, { code: 0, message: 'success', data: result })
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/playground/library') {
+      const user = await getAuthenticatedUser(req)
+      const page = await listLibraryItems(req, user, url.searchParams)
+      json(res, 200, { code: 0, message: 'success', data: page })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/library/batch') {
+      const user = await getAuthenticatedUser(req)
+      const body = await parseJsonBody(req)
+      const result = await batchUpdateLibraryItems(user, body)
+      json(res, 200, { code: 0, message: 'success', data: result })
+      return
+    }
+
+    if ((req.method === 'PATCH' || req.method === 'DELETE') && url.pathname.startsWith('/api/playground/library/')) {
+      const user = await getAuthenticatedUser(req)
+      const itemId = url.pathname.split('/').pop()
+      if (!itemId) {
+        throw appError(400, 'Library item ID is required')
+      }
+      if (req.method === 'DELETE') {
+        const result = await deleteLibraryItems(user, [itemId])
+        json(res, 200, { code: 0, message: 'success', data: result })
+        return
+      }
+      const body = await parseJsonBody(req)
+      const item = await updateLibraryItem(user, itemId, body)
+      json(res, 200, { code: 0, message: 'success', data: item })
       return
     }
 

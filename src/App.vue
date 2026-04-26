@@ -2,19 +2,23 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import logoUrl from '../asset/logo.png'
 import {
+  batchUpdateLibraryItems,
   createConversation,
   createApiKey,
   createImageTask,
+  deleteLibraryItem,
   getConversation,
   getImageTask,
   getProfile,
   hasAuthToken,
+  listLibraryItems,
   listConversations,
   listApiKeys,
   listAvailableGroups,
   login,
   logout,
   listGalleryItems,
+  updateLibraryItem,
   saveConversationState,
   sendResponsesRequest,
   shareGalleryImage
@@ -28,6 +32,8 @@ import type {
   GeneratedImage,
   Group,
   ImageTaskStatus,
+  LibraryFacet,
+  LibraryItem,
   UserProfile
 } from './types'
 
@@ -115,7 +121,7 @@ const imageToolInstructions = [
 ].join(' ')
 
 const isAuthenticated = ref(hasAuthToken())
-const activeView = ref<'gallery' | 'create'>('gallery')
+const activeView = ref<'gallery' | 'library' | 'create'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
 const themeMode = ref<'light' | 'dark'>('light')
 const toastAutoCloseMs = 5000
@@ -139,8 +145,28 @@ const galleryNextOffset = ref(0)
 const galleryColumnCount = ref(4)
 const isMobileViewport = ref(false)
 const gallerySentinel = ref<HTMLElement | null>(null)
+const libraryBatchSize = 24
+const libraryItems = ref<LibraryItem[]>([])
+const libraryBusy = ref(false)
+const libraryLoadingMore = ref(false)
+const libraryHasMore = ref(true)
+const libraryNextOffset = ref(0)
+const libraryQuery = ref('')
+const libraryFolderFilter = ref('')
+const libraryTagFilter = ref('')
+const libraryFavoriteOnly = ref(false)
+const libraryFolders = ref<LibraryFacet[]>([])
+const libraryTags = ref<LibraryFacet[]>([])
+const librarySelectedIds = ref<string[]>([])
+const libraryBatchFolder = ref('')
+const libraryBatchTags = ref('')
+const librarySelectionMode = ref(false)
+const libraryTotal = ref(0)
+const librarySentinel = ref<HTMLElement | null>(null)
 let galleryObserver: IntersectionObserver | null = null
+let libraryObserver: IntersectionObserver | null = null
 let toastTimer: number | null = null
+let librarySearchTimer: number | null = null
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -167,6 +193,7 @@ const imageTaskLabel = ref('')
 const generatedImages = ref<GeneratedImage[]>([])
 const selectedImageKey = ref('')
 const selectedGalleryItem = ref<GalleryItem | null>(null)
+const selectedLibraryItem = ref<LibraryItem | null>(null)
 const selectedStandaloneImage = ref<StandalonePreviewImage | null>(null)
 const imageSource = ref<ChatImageAttachment | null>(null)
 const imageSourceInput = ref<HTMLInputElement | null>(null)
@@ -484,6 +511,18 @@ function galleryFallbackUrl(item: GalleryItem): string {
   return item.originalUrl || item.thumbnailUrl || item.imageUrl || ''
 }
 
+function libraryImageUrl(item: LibraryItem): string {
+  return item.thumbnailUrl || buildCompressedPreviewUrl(item.image_url || item.originalUrl || '', galleryPreviewWidth) || item.image_url || item.imageUrl || item.originalUrl || ''
+}
+
+function libraryModalUrl(item: LibraryItem): string {
+  return buildCompressedPreviewUrl(item.image_url || item.originalUrl || '', modalPreviewWidth) || item.originalUrl || libraryImageUrl(item)
+}
+
+function libraryFallbackUrl(item: LibraryItem): string {
+  return item.originalUrl || item.thumbnailUrl || item.imageUrl || ''
+}
+
 function parseImageSize(size?: string): { width: number, height: number } | null {
   if (!size) {
     return null
@@ -616,6 +655,7 @@ function resetLocalEditState(): void {
 function closeImageModal(): void {
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
+  selectedLibraryItem.value = null
   selectedStandaloneImage.value = null
   resetLocalEditState()
 }
@@ -626,6 +666,7 @@ function openImageModal(image: GeneratedImage, index: number): void {
   }
   selectedImageKey.value = imageShareKey(image, index)
   selectedGalleryItem.value = null
+  selectedLibraryItem.value = null
   selectedStandaloneImage.value = null
   resetLocalEditState()
 }
@@ -639,6 +680,15 @@ function canvasNavigate(direction: -1 | 1): void {
 function openGalleryModal(item: GalleryItem): void {
   selectedGalleryItem.value = item
   selectedImageKey.value = ''
+  selectedLibraryItem.value = null
+  selectedStandaloneImage.value = null
+  resetLocalEditState()
+}
+
+function openLibraryModal(item: LibraryItem): void {
+  selectedLibraryItem.value = item
+  selectedImageKey.value = ''
+  selectedGalleryItem.value = null
   selectedStandaloneImage.value = null
   resetLocalEditState()
 }
@@ -647,11 +697,16 @@ function openStandaloneImageModal(image: StandalonePreviewImage): void {
   selectedStandaloneImage.value = image
   selectedImageKey.value = ''
   selectedGalleryItem.value = null
+  selectedLibraryItem.value = null
   resetLocalEditState()
 }
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
   handleImageError(event, galleryFallbackUrl(item))
+}
+
+function handleLibraryImageError(event: Event, item: LibraryItem): void {
+  handleImageError(event, libraryFallbackUrl(item))
 }
 
 function syncLocalEditMaskCanvas(): boolean {
@@ -823,6 +878,39 @@ const galleryColumns = computed(() => {
   return columns
 })
 
+const libraryColumns = computed(() => {
+  const columnCount = Math.max(galleryColumnCount.value, 1)
+  const columns = Array.from({ length: columnCount }, () => [] as LibraryItem[])
+  const columnHeights = Array.from({ length: columnCount }, () => 0)
+
+  for (const item of libraryItems.value) {
+    let targetColumnIndex = 0
+    for (let index = 1; index < columnCount; index += 1) {
+      if (columnHeights[index] < columnHeights[targetColumnIndex]) {
+        targetColumnIndex = index
+      }
+    }
+    columns[targetColumnIndex].push(item)
+    columnHeights[targetColumnIndex] += imageRelativeHeight(item.size) + 0.02
+  }
+
+  return columns
+})
+
+const selectedLibraryIdsSet = computed(() => new Set(librarySelectedIds.value))
+
+const selectedLibraryItems = computed(() => {
+  const selectedIds = selectedLibraryIdsSet.value
+  return libraryItems.value.filter((item) => selectedIds.has(item.id))
+})
+
+const hasLibraryFilters = computed(() => (
+  libraryQuery.value.trim().length > 0 ||
+  libraryFolderFilter.value.length > 0 ||
+  libraryTagFilter.value.length > 0 ||
+  libraryFavoriteOnly.value
+))
+
 function triggerDownload(url: string, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
@@ -969,6 +1057,20 @@ function resetConversationState(): void {
   selectedImageKey.value = ''
   sharedImageKeys.value = []
   localStorage.removeItem(PENDING_IMAGE_TASKS_KEY)
+}
+
+function resetLibraryState(): void {
+  libraryItems.value = []
+  libraryFolders.value = []
+  libraryTags.value = []
+  librarySelectedIds.value = []
+  librarySelectionMode.value = false
+  libraryBatchFolder.value = ''
+  libraryBatchTags.value = ''
+  libraryNextOffset.value = 0
+  libraryHasMore.value = true
+  libraryTotal.value = 0
+  selectedLibraryItem.value = null
 }
 
 function readPendingImageTasks(): PendingImageTask[] {
@@ -1190,6 +1292,7 @@ async function handleLogout(): Promise<void> {
   }
   clearManualImageSource()
   resetConversationState()
+  resetLibraryState()
 }
 
 async function handleCreateApiKey(): Promise<void> {
@@ -1288,6 +1391,234 @@ function setupGalleryObserver(): void {
   })
   galleryObserver.observe(gallerySentinel.value)
   void loadVisibleGalleryPages()
+}
+
+function libraryFolderParam(value: string): string | undefined {
+  if (!value) {
+    return undefined
+  }
+  return value
+}
+
+function libraryFolderLabel(value: string): string {
+  return value || '未归档'
+}
+
+function parseLibraryTagsInput(value: string): string[] {
+  const tags: string[] = []
+  const seen = new Set<string>()
+  for (const rawTag of value.split(/[,\n，]+/)) {
+    const tag = rawTag.trim().replace(/^#+/, '').replace(/\s+/g, ' ').slice(0, 32)
+    const key = tag.toLowerCase()
+    if (!tag || seen.has(key)) {
+      continue
+    }
+    seen.add(key)
+    tags.push(tag)
+    if (tags.length >= 20) {
+      break
+    }
+  }
+  return tags
+}
+
+function clearLibraryFilters(): void {
+  libraryQuery.value = ''
+  libraryFolderFilter.value = ''
+  libraryTagFilter.value = ''
+  libraryFavoriteOnly.value = false
+}
+
+async function refreshLibrary(): Promise<void> {
+  if (!isAuthenticated.value) {
+    resetLibraryState()
+    return
+  }
+  libraryBusy.value = true
+  libraryNextOffset.value = 0
+  libraryHasMore.value = true
+  try {
+    const page = await listLibraryItems({
+      offset: 0,
+      limit: libraryBatchSize,
+      query: libraryQuery.value,
+      folder: libraryFolderParam(libraryFolderFilter.value),
+      tag: libraryTagFilter.value,
+      favorite: libraryFavoriteOnly.value
+    })
+    libraryItems.value = page.items
+    libraryFolders.value = page.folders
+    libraryTags.value = page.tags
+    libraryTotal.value = page.total
+    libraryNextOffset.value = page.nextOffset || libraryItems.value.length
+    libraryHasMore.value = page.hasMore
+    librarySelectedIds.value = librarySelectedIds.value.filter((id) => page.items.some((item) => item.id === id))
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '加载个人作品库失败')
+  } finally {
+    libraryBusy.value = false
+    if (activeView.value === 'library') {
+      await nextTick()
+      setupLibraryObserver()
+    }
+  }
+}
+
+async function loadMoreLibrary(): Promise<void> {
+  if (!isAuthenticated.value || libraryBusy.value || libraryLoadingMore.value || !libraryHasMore.value) {
+    return
+  }
+  libraryLoadingMore.value = true
+  try {
+    const page = await listLibraryItems({
+      offset: libraryNextOffset.value,
+      limit: libraryBatchSize,
+      query: libraryQuery.value,
+      folder: libraryFolderParam(libraryFolderFilter.value),
+      tag: libraryTagFilter.value,
+      favorite: libraryFavoriteOnly.value
+    })
+    const existingIds = new Set(libraryItems.value.map((item) => item.id))
+    libraryItems.value = [
+      ...libraryItems.value,
+      ...page.items.filter((item) => !existingIds.has(item.id))
+    ]
+    libraryFolders.value = page.folders
+    libraryTags.value = page.tags
+    libraryTotal.value = page.total
+    libraryNextOffset.value = page.nextOffset || libraryItems.value.length
+    libraryHasMore.value = page.hasMore
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '加载更多作品失败')
+  } finally {
+    libraryLoadingMore.value = false
+  }
+}
+
+function isLibrarySentinelNearViewport(): boolean {
+  if (activeView.value !== 'library' || !librarySentinel.value) {
+    return false
+  }
+  const rect = librarySentinel.value.getBoundingClientRect()
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+  return rect.top <= viewportHeight + 180 && rect.bottom >= -180
+}
+
+async function loadVisibleLibraryPages(): Promise<void> {
+  await nextTick()
+  let loadCount = 0
+  while (
+    libraryHasMore.value &&
+    !libraryBusy.value &&
+    !libraryLoadingMore.value &&
+    isLibrarySentinelNearViewport() &&
+    loadCount < 6
+  ) {
+    loadCount += 1
+    await loadMoreLibrary()
+    await nextTick()
+  }
+}
+
+function setupLibraryObserver(): void {
+  libraryObserver?.disconnect()
+  if (!librarySentinel.value) {
+    return
+  }
+  libraryObserver = new IntersectionObserver((entries) => {
+    if (entries.some((entry) => entry.isIntersecting)) {
+      void loadVisibleLibraryPages()
+    }
+  }, {
+    rootMargin: '40px 0px'
+  })
+  libraryObserver.observe(librarySentinel.value)
+  void loadVisibleLibraryPages()
+}
+
+function scheduleLibraryRefresh(): void {
+  if (librarySearchTimer) {
+    window.clearTimeout(librarySearchTimer)
+  }
+  librarySearchTimer = window.setTimeout(() => {
+    librarySearchTimer = null
+    void refreshLibrary()
+  }, 260)
+}
+
+function toggleLibrarySelection(item: LibraryItem): void {
+  const selected = selectedLibraryIdsSet.value
+  librarySelectedIds.value = selected.has(item.id)
+    ? librarySelectedIds.value.filter((id) => id !== item.id)
+    : [...librarySelectedIds.value, item.id]
+}
+
+function setLibrarySelectionMode(enabled: boolean): void {
+  librarySelectionMode.value = enabled
+  if (!enabled) {
+    librarySelectedIds.value = []
+  }
+}
+
+async function toggleLibraryFavorite(item: LibraryItem): Promise<void> {
+  try {
+    const updated = await updateLibraryItem(item.id, { favorite: !item.favorite })
+    libraryItems.value = libraryItems.value.map((current) => current.id === updated.id ? updated : current)
+    if (selectedLibraryItem.value?.id === updated.id) {
+      selectedLibraryItem.value = updated
+    }
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '更新收藏失败')
+  }
+}
+
+async function handleDeleteLibraryItem(item: LibraryItem): Promise<void> {
+  if (!window.confirm('确定从个人作品库删除这张图片吗？不会删除会话记录。')) {
+    return
+  }
+  try {
+    await deleteLibraryItem(item.id)
+    libraryItems.value = libraryItems.value.filter((current) => current.id !== item.id)
+    librarySelectedIds.value = librarySelectedIds.value.filter((id) => id !== item.id)
+    if (selectedLibraryItem.value?.id === item.id) {
+      closeImageModal()
+    }
+    setSuccess('已从个人作品库删除。')
+    void refreshLibrary()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '删除作品失败')
+  }
+}
+
+async function handleLibraryBatchAction(action: 'favorite' | 'unfavorite' | 'delete' | 'move' | 'add_tags' | 'remove_tags' | 'set_tags'): Promise<void> {
+  const ids = [...librarySelectedIds.value]
+  if (ids.length === 0) {
+    setError('请先选择作品。')
+    return
+  }
+  if (action === 'delete' && !window.confirm(`确定从个人作品库删除 ${ids.length} 张图片吗？不会删除会话记录。`)) {
+    return
+  }
+  const tags = parseLibraryTagsInput(libraryBatchTags.value)
+  if ((action === 'add_tags' || action === 'remove_tags' || action === 'set_tags') && tags.length === 0) {
+    setError('请输入要处理的标签。')
+    return
+  }
+
+  try {
+    await batchUpdateLibraryItems({
+      ids,
+      action,
+      folder: action === 'move' ? libraryBatchFolder.value : undefined,
+      tags: action === 'add_tags' || action === 'remove_tags' || action === 'set_tags' ? tags : undefined
+    })
+    setSuccess('批量操作已完成。')
+    libraryBatchTags.value = action === 'add_tags' || action === 'remove_tags' || action === 'set_tags' ? '' : libraryBatchTags.value
+    librarySelectedIds.value = []
+    await refreshLibrary()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '批量操作失败')
+  }
 }
 
 function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
@@ -2307,10 +2638,32 @@ watch(activeView, async (view) => {
   if (view !== 'gallery') {
     galleryObserver?.disconnect()
     galleryObserver = null
+  }
+  if (view !== 'library') {
+    libraryObserver?.disconnect()
+    libraryObserver = null
+  }
+  if (view === 'library') {
+    if (isAuthenticated.value) {
+      await refreshLibrary()
+    } else {
+      resetLibraryState()
+    }
+    await nextTick()
+    setupLibraryObserver()
+    return
+  }
+  if (view !== 'gallery') {
     return
   }
   await nextTick()
   setupGalleryObserver()
+})
+
+watch([libraryQuery, libraryFolderFilter, libraryTagFilter, libraryFavoriteOnly], () => {
+  if (activeView.value === 'library' && isAuthenticated.value) {
+    scheduleLibraryRefresh()
+  }
 })
 
 function makeMockSvg(bg: string, label: string): string {
@@ -2368,7 +2721,11 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearToastTimer()
+  if (librarySearchTimer) {
+    window.clearTimeout(librarySearchTimer)
+  }
   galleryObserver?.disconnect()
+  libraryObserver?.disconnect()
   window.removeEventListener('resize', syncViewportLayout)
 })
 </script>
@@ -2421,6 +2778,13 @@ onBeforeUnmount(() => {
           </svg>
           <span v-if="!mainSidebarCollapsed">画廊</span>
           <small v-if="!mainSidebarCollapsed">Public gallery</small>
+        </button>
+        <button :class="{ active: activeView === 'library' }" type="button" title="作品库" @click="activeView = 'library'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M4 19.5V6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v11.5M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+          </svg>
+          <span v-if="!mainSidebarCollapsed">作品库</span>
+          <small v-if="!mainSidebarCollapsed">Personal library</small>
         </button>
         <button :class="{ active: activeView === 'create' }" type="button" title="创造" @click="activeView = 'create'">
           <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -2505,6 +2869,184 @@ onBeforeUnmount(() => {
         <span v-if="galleryLoadingMore">正在加载更多...</span>
         <span v-else-if="!galleryHasMore && galleryItems.length > 0">已经到底了</span>
       </div>
+    </section>
+
+    <section v-else-if="activeView === 'library'" class="page library-page">
+      <template v-if="!isAuthenticated">
+        <section class="login-card panel">
+          <div>
+            <p class="eyebrow">Library</p>
+            <h1>登录后管理个人作品库</h1>
+            <p>作品库会保存你生成过的图片，并支持搜索、标签、文件夹、收藏、删除和批量管理。</p>
+          </div>
+          <form class="login-form" @submit.prevent="handleLogin">
+            <label>
+              邮箱
+              <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              密码
+              <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+            </label>
+            <button :disabled="loginBusy" type="submit">
+              {{ loginBusy ? '登录中...' : '进入作品库' }}
+            </button>
+          </form>
+        </section>
+      </template>
+
+      <template v-else>
+        <header class="library-header">
+          <div class="library-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
+            </svg>
+            <input v-model="libraryQuery" type="search" placeholder="搜索提示词、尺寸、标签或文件夹" />
+          </div>
+          <div class="library-actions">
+            <button
+              class="ghost library-icon-button"
+              type="button"
+              :class="{ active: libraryFavoriteOnly }"
+              title="只看收藏"
+              aria-label="只看收藏"
+              @click="libraryFavoriteOnly = !libraryFavoriteOnly"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m12 17.3-6.18 3.25 1.18-6.88L2 8.8l6.9-1L12 1.55l3.1 6.25 6.9 1-5 4.87 1.18 6.88L12 17.3Z" />
+              </svg>
+            </button>
+            <button
+              class="ghost library-icon-button"
+              type="button"
+              :disabled="libraryBusy"
+              :title="libraryBusy ? '刷新中' : '刷新作品库'"
+              aria-label="刷新作品库"
+              @click="refreshLibrary"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ spinning: libraryBusy }">
+                <path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6" />
+              </svg>
+            </button>
+            <button
+              class="secondary library-batch-toggle"
+              type="button"
+              :class="{ active: librarySelectionMode }"
+              @click="setLibrarySelectionMode(!librarySelectionMode)"
+            >
+              {{ librarySelectionMode ? '完成' : '批量' }}
+            </button>
+          </div>
+        </header>
+
+        <div class="library-filter-row">
+          <select v-model="libraryFolderFilter" title="文件夹">
+            <option value="">全部文件夹</option>
+            <option v-for="folder in libraryFolders" :key="`folder-${folder.name || 'none'}`" :value="folder.name || '__none'">
+              {{ libraryFolderLabel(folder.name) }} · {{ folder.count }}
+            </option>
+          </select>
+          <select v-model="libraryTagFilter" title="标签">
+            <option value="">全部标签</option>
+            <option v-for="tag in libraryTags" :key="`tag-${tag.name}`" :value="tag.name">
+              #{{ tag.name }} · {{ tag.count }}
+            </option>
+          </select>
+          <button v-if="hasLibraryFilters" class="ghost mini" type="button" @click="clearLibraryFilters">清除筛选</button>
+          <span class="library-count">{{ libraryTotal }} 张作品</span>
+        </div>
+
+        <section v-if="librarySelectionMode" class="library-batch-bar">
+          <strong>{{ selectedLibraryItems.length }} 已选</strong>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('favorite')">收藏</button>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('unfavorite')">取消收藏</button>
+          <label>
+            <span>文件夹</span>
+            <input v-model="libraryBatchFolder" type="text" placeholder="例如：角色设计" />
+          </label>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('move')">移动</button>
+          <label>
+            <span>标签</span>
+            <input v-model="libraryBatchTags" type="text" placeholder="海报, 商业, 草图" />
+          </label>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('add_tags')">加标签</button>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('set_tags')">设标签</button>
+          <button class="secondary mini" type="button" @click="handleLibraryBatchAction('remove_tags')">移除标签</button>
+          <button class="danger mini" type="button" @click="handleLibraryBatchAction('delete')">删除</button>
+        </section>
+
+        <div class="gallery-masonry library-masonry" :style="{ '--gallery-columns': String(galleryColumnCount) }">
+          <article v-if="libraryBusy" class="gallery-empty">
+            正在读取个人作品库...
+          </article>
+          <article v-else-if="libraryItems.length === 0" class="gallery-empty">
+            当前筛选下没有作品。生成图片后，作品会自动保存到这里。
+          </article>
+          <template v-else>
+            <div
+              v-for="(column, columnIndex) in libraryColumns"
+              :key="`library-column-${columnIndex}`"
+              class="masonry-column"
+            >
+              <article
+                v-for="item in column"
+                :key="item.id"
+                class="library-tile"
+                :class="{ selected: selectedLibraryIdsSet.has(item.id) }"
+              >
+                <button
+                  class="masonry-tile library-image-button"
+                  type="button"
+                  :style="{ aspectRatio: imageAspectRatio(item.size) || '1 / 1' }"
+                  @click="librarySelectionMode ? toggleLibrarySelection(item) : openLibraryModal(item)"
+                >
+                  <img
+                    :src="libraryImageUrl(item)"
+                    :alt="item.prompt"
+                    loading="lazy"
+                    decoding="async"
+                    @error="handleLibraryImageError($event, item)"
+                  />
+                  <span v-if="librarySelectionMode" class="library-select-mark">
+                    <svg v-if="selectedLibraryIdsSet.has(item.id)" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m5 12 4 4L19 6" />
+                    </svg>
+                  </span>
+                </button>
+                <div class="library-tile-meta">
+                  <button
+                    class="library-fav-button"
+                    type="button"
+                    :class="{ active: item.favorite }"
+                    :aria-label="item.favorite ? '取消收藏' : '收藏'"
+                    @click="toggleLibraryFavorite(item)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m12 17.3-6.18 3.25 1.18-6.88L2 8.8l6.9-1L12 1.55l3.1 6.25 6.9 1-5 4.87 1.18 6.88L12 17.3Z" />
+                    </svg>
+                  </button>
+                  <div>
+                    <strong>{{ libraryFolderLabel(item.folder) }}</strong>
+                    <p>{{ item.prompt }}</p>
+                    <div v-if="item.tags.length > 0" class="library-tags">
+                      <span v-for="tag in item.tags.slice(0, 3)" :key="`${item.id}-${tag}`">#{{ tag }}</span>
+                    </div>
+                  </div>
+                  <button class="library-delete-button" type="button" aria-label="删除作品" @click="handleDeleteLibraryItem(item)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18M8 6V4h8v2M7 6l1 14h8l1-14" />
+                    </svg>
+                  </button>
+                </div>
+              </article>
+            </div>
+          </template>
+        </div>
+        <div ref="librarySentinel" class="gallery-sentinel" aria-hidden="true">
+          <span v-if="libraryLoadingMore">正在加载更多...</span>
+          <span v-else-if="!libraryHasMore && libraryItems.length > 0">已经到底了</span>
+        </div>
+      </template>
     </section>
 
     <section v-else class="page create-page">
@@ -3085,7 +3627,7 @@ onBeforeUnmount(() => {
     </section>
 
     <div
-      v-if="selectedImage || selectedGalleryItem"
+      v-if="selectedImage || selectedGalleryItem || selectedLibraryItem"
       class="image-modal"
       role="dialog"
       aria-modal="true"
@@ -3117,12 +3659,14 @@ onBeforeUnmount(() => {
             </div>
             <img
               v-else
-              :src="selectedImage ? imagePreviewUrl(selectedImage, modalPreviewWidth) : (selectedGalleryItem ? galleryModalUrl(selectedGalleryItem) : '')"
-              :alt="selectedImage?.prompt || selectedGalleryItem?.prompt"
+              :src="selectedImage
+                ? imagePreviewUrl(selectedImage, modalPreviewWidth)
+                : (selectedLibraryItem ? libraryModalUrl(selectedLibraryItem) : (selectedGalleryItem ? galleryModalUrl(selectedGalleryItem) : ''))"
+              :alt="selectedImage?.prompt || selectedLibraryItem?.prompt || selectedGalleryItem?.prompt"
               loading="lazy"
               @error="selectedImage
                 ? handleGeneratedImageError($event, selectedImage)
-                : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined)"
+                : (selectedLibraryItem ? handleLibraryImageError($event, selectedLibraryItem) : (selectedGalleryItem ? handleGalleryImageError($event, selectedGalleryItem) : undefined))"
             />
             <div class="modal-actions">
               <button
@@ -3130,8 +3674,8 @@ onBeforeUnmount(() => {
                 type="button"
                 aria-label="下载图片"
                 @click="downloadImage(
-                  selectedImage ? imageDownloadUrl(selectedImage) : selectedGalleryItem?.originalUrl || '',
-                  selectedImage?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
+                  selectedImage ? imageDownloadUrl(selectedImage) : (selectedLibraryItem?.originalUrl || selectedGalleryItem?.originalUrl || ''),
+                  selectedImage?.prompt || selectedLibraryItem?.prompt || selectedGalleryItem?.prompt || 'gallery-image'
                 )"
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -3166,6 +3710,29 @@ onBeforeUnmount(() => {
               >
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M12 20h9M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+                </svg>
+              </button>
+              <button
+                v-if="selectedLibraryItem"
+                class="icon-button"
+                type="button"
+                :class="{ active: selectedLibraryItem.favorite }"
+                :aria-label="selectedLibraryItem.favorite ? '取消收藏' : '收藏'"
+                @click="toggleLibraryFavorite(selectedLibraryItem)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m12 17.3-6.18 3.25 1.18-6.88L2 8.8l6.9-1L12 1.55l3.1 6.25 6.9 1-5 4.87 1.18 6.88L12 17.3Z" />
+                </svg>
+              </button>
+              <button
+                v-if="selectedLibraryItem"
+                class="icon-button"
+                type="button"
+                aria-label="删除作品"
+                @click="handleDeleteLibraryItem(selectedLibraryItem)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M3 6h18M8 6V4h8v2M7 6l1 14h8l1-14" />
                 </svg>
               </button>
             </div>
@@ -3210,15 +3777,21 @@ onBeforeUnmount(() => {
           </form>
         </div>
         <div class="modal-copy">
-          <p class="eyebrow">Prompt</p>
-          <h2>{{ selectedImage?.size || selectedGalleryItem?.size }}</h2>
+          <p class="eyebrow">{{ selectedLibraryItem ? 'Library' : 'Prompt' }}</p>
+          <h2>{{ selectedImage?.size || selectedLibraryItem?.size || selectedGalleryItem?.size }}</h2>
           <div class="modal-prompt-scroll">
-            <p>{{ selectedImage?.prompt || selectedGalleryItem?.prompt }}</p>
+            <p>{{ selectedImage?.prompt || selectedLibraryItem?.prompt || selectedGalleryItem?.prompt }}</p>
+            <div v-if="selectedLibraryItem" class="library-modal-meta">
+              <span>{{ libraryFolderLabel(selectedLibraryItem.folder) }}</span>
+              <span v-for="tag in selectedLibraryItem.tags" :key="`modal-${selectedLibraryItem.id}-${tag}`">#{{ tag }}</span>
+            </div>
           </div>
           <small>
             {{ selectedImage
               ? new Date(selectedImage.createdAt).toLocaleString()
-              : `${selectedGalleryItem?.sharedByName || '匿名用户'} · ${new Date(selectedGalleryItem?.createdAt || '').toLocaleString()}` }}
+              : (selectedLibraryItem
+                ? `${selectedLibraryItem.favorite ? '已收藏 · ' : ''}${new Date(selectedLibraryItem.createdAt || '').toLocaleString()}`
+                : `${selectedGalleryItem?.sharedByName || '匿名用户'} · ${new Date(selectedGalleryItem?.createdAt || '').toLocaleString()}`) }}
           </small>
         </div>
       </article>

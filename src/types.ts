@@ -110,6 +110,43 @@ export interface GalleryPage {
   hasMore: boolean
 }
 
+export interface LibraryFacet {
+  name: string
+  count: number
+}
+
+export interface LibraryItem {
+  id: string
+  prompt: string
+  size: string
+  image_url?: string
+  imageUrl: string
+  thumbnailUrl: string
+  originalUrl: string
+  sourceConversationId?: string
+  sourceImageId?: string
+  folder: string
+  tags: string[]
+  favorite: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface LibraryPage {
+  items: LibraryItem[]
+  nextOffset: number | null
+  hasMore: boolean
+  folders: LibraryFacet[]
+  tags: LibraryFacet[]
+  total: number
+}
+
+export type LibraryBatchAction = 'favorite' | 'unfavorite' | 'delete' | 'move' | 'add_tags' | 'remove_tags' | 'set_tags'
+
+export interface LibraryBatchResponse {
+  updated: number
+}
+
 export interface ImageTaskResultItem {
   id: string
   prompt: string
