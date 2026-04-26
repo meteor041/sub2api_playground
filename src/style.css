@@ -921,6 +921,72 @@ h2 {
   font-size: 0.84rem;
 }
 
+.compare-inline-menu {
+  position: relative;
+  min-width: 0;
+}
+
+.compare-inline-menu summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  list-style: none;
+  padding: 0.72rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  color: var(--ink);
+  background: var(--control-bg);
+  cursor: pointer;
+}
+
+.compare-inline-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.compare-inline-menu summary strong {
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.compare-inline-menu summary span {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.compare-inline-menu summary svg {
+  width: 18px;
+  height: 18px;
+  margin-left: auto;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.compare-inline-menu[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.compare-inline-strip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+  min-width: 220px;
+  max-width: min(72vw, 420px);
+  overflow-x: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--paper-strong);
+  box-shadow: var(--shadow);
+}
+
 .canvas-icon-btn {
   display: inline-grid;
   place-items: center;
@@ -1697,67 +1763,6 @@ h2 {
   align-content: start;
   min-height: 0;
   max-width: 100%;
-}
-
-.compare-panel {
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--panel-soft-bg);
-  width: 100%;
-}
-
-.compare-panel.compact {
-  padding: 10px 12px;
-}
-
-.compare-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 0;
-  color: var(--ink);
-  background: transparent;
-  box-shadow: none;
-  text-align: left;
-}
-
-.compare-toggle strong {
-  font-size: 0.95rem;
-}
-
-.compare-toggle span {
-  color: var(--muted);
-  font-size: 0.82rem;
-}
-
-.compare-toggle svg {
-  width: 18px;
-  height: 18px;
-  margin-left: auto;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.8;
-  transition: transform 160ms ease;
-}
-
-.compare-toggle svg.expanded {
-  transform: rotate(180deg);
-}
-
-.compare-strip {
-  display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  margin-top: 10px;
-  padding-bottom: 4px;
-  scroll-snap-type: x proximity;
-  -webkit-overflow-scrolling: touch;
 }
 
 .compare-chip {
