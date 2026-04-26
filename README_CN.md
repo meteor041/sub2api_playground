@@ -302,11 +302,31 @@ cd "$DEPLOY_PATH"
 git fetch --tags origin
 git fetch origin "$REF"
 git checkout --force FETCH_HEAD
-RUN_SH_SKIP_GIT_PULL=true bash ./run.sh
-curl -fsS http://127.0.0.1:8081/health
+docker compose --env-file .deploy.env -f docker-compose.host.example.yml up -d --build --force-recreate
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS http://127.0.0.1:8081/health; then
+    break
+  fi
+  sleep 3
+done
 ```
 
-运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地。当前 workflow 会直接调用服务器上的 `run.sh`，因此要确保 `run.sh` 本身就是你线上认可的部署入口。
+运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地，不要提交到仓库。推荐在服务器项目根目录维护一个未纳入 Git 的 `.deploy.env`，供 deploy workflow 使用。
+
+`.deploy.env` 示例：
+
+```bash
+PLAYGROUND_ENABLE_CF_IMAGE_RESIZING=true
+PLAYGROUND_PUBLIC_ORIGIN=https://playground.meteor041.com
+SUB2API_UPSTREAM=http://127.0.0.1:8080
+DATABASE_URL=postgres://user:password@127.0.0.1:5432/sub2api_playground?sslmode=disable
+R2_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+R2_BUCKET=meteor-images
+R2_REGION=auto
+R2_ACCESS_KEY_ID=your-access-key-id
+R2_SECRET_ACCESS_KEY=your-secret-access-key
+PLAYGROUND_KEEP_LOCAL_ASSETS=false
+```
 
 ## 说明
 

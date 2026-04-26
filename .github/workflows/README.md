@@ -28,5 +28,8 @@ Keep runtime secrets on the server, not in GitHub Actions:
 - `R2_ACCESS_KEY_ID`
 - `R2_SECRET_ACCESS_KEY`
 
-The deploy workflow assumes `docker compose -f docker-compose.host.example.yml up -d --build --force-recreate`
+The deploy workflow assumes a server-local `.deploy.env` file exists in the repo root and that:
+
+`docker compose --env-file .deploy.env -f docker-compose.host.example.yml up -d --build --force-recreate`
+
 works when run inside the checked-out repo on the server.
