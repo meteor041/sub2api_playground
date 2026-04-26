@@ -43,7 +43,20 @@ const textModels = [
 ]
 
 const imageModel = 'gpt-image-2'
-const imageSizes = ['1024x1024', '1536x1024', '1024x1536']
+const imageSizeOptions = [
+  { value: '1024x1024', label: '1:1 方图 · 1024x1024' },
+  { value: '1280x1024', label: '5:4 横图 · 1280x1024' },
+  { value: '1024x1280', label: '4:5 竖图 · 1024x1280' },
+  { value: '1408x1056', label: '4:3 横图 · 1408x1056' },
+  { value: '1056x1408', label: '3:4 竖图 · 1056x1408' },
+  { value: '1536x1024', label: '3:2 横图 · 1536x1024' },
+  { value: '1024x1536', label: '2:3 竖图 · 1024x1536' },
+  { value: '1536x864', label: '16:9 横图 · 1536x864' },
+  { value: '864x1536', label: '9:16 竖图 · 864x1536' },
+  { value: '1792x768', label: '21:9 宽屏 · 1792x768' },
+  { value: '768x1792', label: '9:21 长竖屏 · 768x1792' }
+]
+const imageSizes = imageSizeOptions.map((option) => option.value)
 const maxImageToolCallsPerTurn = 1
 const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
@@ -2485,7 +2498,9 @@ onBeforeUnmount(() => {
                 <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
               </select>
               <select v-if="createMode === 'direct'" v-model="imageSize" title="图片尺寸">
-                <option v-for="size in imageSizes" :key="size" :value="size">{{ size }}</option>
+                <option v-for="option in imageSizeOptions" :key="option.value" :value="option.value">
+                  {{ option.label }}
+                </option>
               </select>
               <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0" title="API Key">
                 <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
