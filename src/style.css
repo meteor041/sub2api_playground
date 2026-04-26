@@ -1705,6 +1705,7 @@ h2 {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: var(--panel-soft-bg);
+  width: 100%;
 }
 
 .compare-panel-header,
@@ -1727,18 +1728,24 @@ h2 {
 }
 
 .compare-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  display: flex;
   gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
 }
 
 .compare-card {
   position: relative;
+  flex: 0 0 120px;
   padding: 0;
   border-radius: 16px;
   overflow: hidden;
   background: var(--tile-bg);
   box-shadow: none;
+  scroll-snap-align: start;
 }
 
 .compare-card.active {
