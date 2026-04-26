@@ -10,6 +10,7 @@ This repository ships with:
 Set these repository or environment secrets before running `Deploy`:
 
 - `DEPLOY_HOST`
+- `DEPLOY_PORT`
 - `DEPLOY_USER`
 - `DEPLOY_PATH`
 - `DEPLOY_SSH_KEY`

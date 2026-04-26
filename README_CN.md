@@ -288,6 +288,7 @@ CD 采用手动触发的 `workflow_dispatch`，避免每次 push 自动发版。
 你需要在 GitHub 仓库或 `production` environment 里配置这些 secrets：
 
 - `DEPLOY_HOST`
+- `DEPLOY_PORT`
 - `DEPLOY_USER`
 - `DEPLOY_PATH`
 - `DEPLOY_SSH_KEY`
@@ -299,11 +300,11 @@ cd "$DEPLOY_PATH"
 git fetch --tags origin
 git fetch origin "$REF"
 git checkout --force FETCH_HEAD
-docker compose -f docker-compose.host.example.yml up -d --build --force-recreate
+RUN_SH_SKIP_GIT_PULL=true bash ./run.sh
 curl -fsS http://127.0.0.1:8081/health
 ```
 
-运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地，不要放进 GitHub Actions secrets 里代替整套运行环境。
+运行时配置例如 `DATABASE_URL`、`SUB2API_UPSTREAM`、R2 密钥等，应该继续保存在服务器本地。当前 workflow 会直接调用服务器上的 `run.sh`，因此要确保 `run.sh` 本身就是你线上认可的部署入口。
 
 ## 说明
 

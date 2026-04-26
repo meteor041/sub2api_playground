@@ -34,6 +34,7 @@ const taskHardTTLms = 6 * 60 * 60 * 1000
 const tasks = new Map()
 const authUserCache = new Map()
 const authUserCacheTtlMs = 60 * 1000
+const rateLimitHits = new Map()
 
 const db = process.env.DATABASE_URL
   ? new Pool({
@@ -78,11 +79,12 @@ function nowIso() {
   return new Date().toISOString()
 }
 
-function json(res, statusCode, payload) {
+function json(res, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload)
   res.writeHead(statusCode, {
     'Content-Length': Buffer.byteLength(body),
-    'Content-Type': 'application/json; charset=utf-8'
+    'Content-Type': 'application/json; charset=utf-8',
+    ...extraHeaders
   })
   res.end(body)
 }
@@ -95,6 +97,111 @@ function appError(statusCode, message) {
 
 function getErrorStatus(error) {
   return Number.isInteger(error?.statusCode) ? error.statusCode : 500
+}
+
+function getClientIp(req) {
+  const forwardedFor = String(req.headers['x-forwarded-for'] || '')
+    .split(',')
+    .map((item) => item.trim())
+    .find(Boolean)
+  return forwardedFor || req.socket?.remoteAddress || 'unknown'
+}
+
+function createRateLimitError(rule) {
+  const retryAfterSeconds = Math.max(1, Math.ceil(rule.windowMs / 1000))
+  const error = appError(429, rule.message || 'Too many requests')
+  error.retryAfterSeconds = retryAfterSeconds
+  return error
+}
+
+function cleanupRateLimitHits() {
+  const now = Date.now()
+  for (const [key, hit] of rateLimitHits.entries()) {
+    if (hit.resetAt <= now) {
+      rateLimitHits.delete(key)
+    }
+  }
+}
+
+function resolveRateLimitRule(req, url) {
+  if (req.method === 'POST' && url.pathname === '/api/v1/auth/login') {
+    return {
+      key: 'login',
+      limit: 20,
+      windowMs: 60 * 1000,
+      message: '登录请求过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/playground/tasks') {
+    return {
+      key: 'task-create',
+      limit: 12,
+      windowMs: 10 * 1000,
+      message: '创建图片任务过于频繁，请稍后再试'
+    }
+  }
+
+  if (
+    (req.method === 'POST' && url.pathname === '/api/playground/conversations') ||
+    (req.method === 'PUT' && url.pathname.startsWith('/api/playground/conversations/'))
+  ) {
+    return {
+      key: 'conversation-write',
+      limit: 30,
+      windowMs: 10 * 1000,
+      message: '会话保存过于频繁，请稍后再试'
+    }
+  }
+
+  if (
+    (req.method === 'POST' && url.pathname === '/api/playground/library/batch') ||
+    ((req.method === 'PATCH' || req.method === 'DELETE') && url.pathname.startsWith('/api/playground/library/'))
+  ) {
+    return {
+      key: 'library-write',
+      limit: 20,
+      windowMs: 10 * 1000,
+      message: '作品库操作过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/playground/gallery') {
+    return {
+      key: 'gallery-share',
+      limit: 10,
+      windowMs: 10 * 1000,
+      message: '分享操作过于频繁，请稍后再试'
+    }
+  }
+
+  return null
+}
+
+function applyRateLimit(req, url) {
+  const rule = resolveRateLimitRule(req, url)
+  if (!rule) {
+    return
+  }
+
+  const now = Date.now()
+  const clientIp = getClientIp(req)
+  const cacheKey = `${rule.key}:${clientIp}`
+  const current = rateLimitHits.get(cacheKey)
+
+  if (!current || current.resetAt <= now) {
+    rateLimitHits.set(cacheKey, {
+      count: 1,
+      resetAt: now + rule.windowMs
+    })
+    return
+  }
+
+  if (current.count >= rule.limit) {
+    throw createRateLimitError(rule)
+  }
+
+  current.count += 1
 }
 
 async function ensureRuntime() {
@@ -1704,13 +1811,39 @@ async function getConversationRow(userId, conversationId) {
   return result.rows[0] || null
 }
 
+async function ensureConversationSnapshotPath(userId, row) {
+  const expectedPath = conversationSnapshotPath(userId, row.id)
+  const storedPath = typeof row.snapshot_path === 'string' ? row.snapshot_path : ''
+
+  if (storedPath && existsSync(storedPath)) {
+    return storedPath
+  }
+
+  if (existsSync(expectedPath)) {
+    if (storedPath !== expectedPath) {
+      const pool = requireDb()
+      await pool.query(
+        `UPDATE playground_conversations
+         SET snapshot_path = $3
+         WHERE id = $1 AND user_id = $2`,
+        [row.id, userId, expectedPath]
+      )
+      row.snapshot_path = expectedPath
+    }
+    return expectedPath
+  }
+
+  return storedPath || expectedPath
+}
+
 async function loadConversation(userId, conversationId) {
   const row = await getConversationRow(userId, conversationId)
   if (!row) {
     throw appError(404, 'Conversation not found')
   }
 
-  const snapshot = await readJsonFile(row.snapshot_path)
+  const snapshotPath = await ensureConversationSnapshotPath(userId, row)
+  const snapshot = await readJsonFile(snapshotPath)
   const state = await hydrateConversationState(snapshot)
 
   return {
@@ -1738,7 +1871,8 @@ async function saveConversationState(userId, conversationId, state) {
     ? new Date(Number(chatMessages[chatMessages.length - 1].createdAt) || Date.now()).toISOString()
     : null
 
-  await writeJsonFile(row.snapshot_path, normalizedSnapshot)
+  const snapshotPath = await ensureConversationSnapshotPath(userId, row)
+  await writeJsonFile(snapshotPath, normalizedSnapshot)
   const pool = requireDb()
   await pool.query(
     `UPDATE playground_conversations
@@ -2261,6 +2395,7 @@ async function serveStatic(req, res) {
 }
 
 setInterval(cleanupTasks, 5 * 60 * 1000).unref()
+setInterval(cleanupRateLimitHits, 60 * 1000).unref()
 await ensureRuntime()
 await resumePersistedImageTasks()
 
@@ -2277,6 +2412,8 @@ const server = createServer(async (req, res) => {
       res.end('ok\n')
       return
     }
+
+    applyRateLimit(req, url)
 
     if (req.method === 'GET' && url.pathname === '/api/playground/gallery') {
       const page = await listGalleryItems(req, url.searchParams.get('limit'), url.searchParams.get('offset'))
@@ -2467,10 +2604,14 @@ const server = createServer(async (req, res) => {
 
     await serveStatic(req, res)
   } catch (error) {
+    const extraHeaders = {}
+    if (Number.isInteger(error?.retryAfterSeconds)) {
+      extraHeaders['Retry-After'] = String(error.retryAfterSeconds)
+    }
     json(res, getErrorStatus(error), {
       code: getErrorStatus(error),
       message: error instanceof Error ? error.message : 'Internal server error'
-    })
+    }, extraHeaders)
   }
 })
 

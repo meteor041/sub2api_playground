@@ -45,14 +45,14 @@ jobs:
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+          ssh-keyscan -p "${{ secrets.DEPLOY_PORT }}" -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy over SSH
         run: |
-          ssh "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
+          ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "cd '${{ secrets.DEPLOY_PATH }}' && \
              git fetch --tags origin && \
              git fetch origin '${{ inputs.ref }}' && \
              git checkout --force FETCH_HEAD && \
-             docker compose -f docker-compose.host.example.yml up -d --build --force-recreate && \
+             RUN_SH_SKIP_GIT_PULL=true bash ./run.sh && \
              curl -fsS http://127.0.0.1:8081/health"
