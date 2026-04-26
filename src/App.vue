@@ -165,6 +165,7 @@ const libraryBatchTags = ref('')
 const librarySelectionMode = ref(false)
 const libraryTotal = ref(0)
 const librarySentinel = ref<HTMLElement | null>(null)
+const compareStripExpanded = ref(false)
 let galleryObserver: IntersectionObserver | null = null
 let libraryObserver: IntersectionObserver | null = null
 let toastTimer: number | null = null
@@ -293,6 +294,15 @@ const displayImageCompareGroup = computed(() => {
   }
   const key = imagePromptGroupKey(displayImage.value)
   return comparableGeneratedImageGroups.value.find((group) => group.key === key) || null
+})
+
+const displayImageComparePosition = computed(() => {
+  if (!displayImageCompareGroup.value) {
+    return 0
+  }
+  const currentIndex = displayImageIndex.value
+  const position = displayImageCompareGroup.value.images.findIndex((entry) => entry.index === currentIndex)
+  return position >= 0 ? position + 1 : 1
 })
 
 const canSubmitLocalEdit = computed(() => (
@@ -728,6 +738,7 @@ function canvasNavigate(direction: -1 | 1): void {
 
 function selectCanvasImage(index: number): void {
   canvasImageIndex.value = index
+  compareStripExpanded.value = false
 }
 
 function openGalleryModal(item: GalleryItem): void {
@@ -2753,6 +2764,9 @@ async function refreshBalanceOnly(): Promise<void> {
 }
 
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
+watch(() => displayImageCompareGroup.value?.key || '', () => {
+  compareStripExpanded.value = false
+})
 
 watch(activeView, async (view) => {
   if (view !== 'gallery') {
@@ -3403,27 +3417,29 @@ onBeforeUnmount(() => {
                     </svg>
                   </button>
                 </div>
-                <section v-if="displayImageCompareGroup" class="compare-panel">
-                  <div class="compare-panel-header">
-                    <strong>多版本对比</strong>
+                <section v-if="displayImageCompareGroup" class="compare-panel compact">
+                  <button
+                    class="compare-toggle"
+                    type="button"
+                    :aria-expanded="compareStripExpanded"
+                    @click="compareStripExpanded = !compareStripExpanded"
+                  >
+                    <strong>版本 {{ displayImageComparePosition }}</strong>
                     <span>{{ displayImageCompareGroup.images.length }} 个版本</span>
-                  </div>
-                  <div class="compare-grid">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" :class="{ expanded: compareStripExpanded }">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </button>
+                  <div v-if="compareStripExpanded" class="compare-strip" role="tablist" aria-label="多版本切换">
                     <button
-                      v-for="entry in displayImageCompareGroup.images"
+                      v-for="(entry, compareIndex) in displayImageCompareGroup.images"
                       :key="imageShareKey(entry.image, entry.index)"
-                      class="compare-card"
+                      class="compare-chip"
                       :class="{ active: entry.index === displayImageIndex }"
                       type="button"
                       @click="selectCanvasImage(entry.index)"
                     >
-                      <img
-                        :src="imagePreviewUrl(entry.image, galleryPreviewWidth)"
-                        :alt="entry.image.prompt"
-                        loading="lazy"
-                        @error="handleGeneratedImageError($event, entry.image)"
-                      />
-                      <span>{{ entry.index + 1 }}</span>
+                      版本 {{ compareIndex + 1 }}
                     </button>
                   </div>
                 </section>
@@ -3749,18 +3765,6 @@ onBeforeUnmount(() => {
             <div class="work-tab-header">
               <span class="eyebrow">Images</span>
               <span class="pill">{{ imageModel }}</span>
-            </div>
-            <div v-if="comparableGeneratedImageGroups.length > 0" class="compare-groups">
-              <button
-                v-for="group in comparableGeneratedImageGroups"
-                :key="group.key"
-                class="compare-group-chip"
-                type="button"
-                @click="selectCanvasImage(group.images[0].index)"
-              >
-                <span>{{ group.images.length }} 个版本</span>
-                <small>{{ group.prompt }}</small>
-              </button>
             </div>
             <div class="local-gallery work-scroll">
               <article
