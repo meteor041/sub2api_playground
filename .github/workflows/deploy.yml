@@ -55,8 +55,9 @@ jobs:
           ssh -p "${{ secrets.DEPLOY_PORT }}" "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}" \
             "cd '${{ secrets.DEPLOY_PATH }}' && \
              git fetch --tags origin && \
-             git fetch origin '${{ github.event_name == 'workflow_dispatch' && inputs.ref || github.ref_name }}' && \
-             git checkout --force FETCH_HEAD && \
+             git checkout main && \
+             git fetch origin main && \
+             git reset --hard origin/main && \
              docker compose --env-file .deploy.env -f docker-compose.host.example.yml up -d --build --force-recreate && \
              for i in 1 2 3 4 5 6 7 8 9 10; do \
                if curl -fsS http://127.0.0.1:8081/health; then \
