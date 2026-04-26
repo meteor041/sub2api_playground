@@ -1192,6 +1192,10 @@ async function refreshGallery(): Promise<void> {
     setError(error instanceof Error ? error.message : '加载公共画廊失败')
   } finally {
     galleryBusy.value = false
+    if (activeView.value === 'gallery') {
+      await nextTick()
+      setupGalleryObserver()
+    }
   }
 }
 
@@ -1216,6 +1220,31 @@ async function loadMoreGallery(): Promise<void> {
   }
 }
 
+function isGallerySentinelNearViewport(): boolean {
+  if (activeView.value !== 'gallery' || !gallerySentinel.value) {
+    return false
+  }
+  const rect = gallerySentinel.value.getBoundingClientRect()
+  const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+  return rect.top <= viewportHeight + 180 && rect.bottom >= -180
+}
+
+async function loadVisibleGalleryPages(): Promise<void> {
+  await nextTick()
+  let loadCount = 0
+  while (
+    galleryHasMore.value &&
+    !galleryBusy.value &&
+    !galleryLoadingMore.value &&
+    isGallerySentinelNearViewport() &&
+    loadCount < 6
+  ) {
+    loadCount += 1
+    await loadMoreGallery()
+    await nextTick()
+  }
+}
+
 function setupGalleryObserver(): void {
   galleryObserver?.disconnect()
   if (!gallerySentinel.value) {
@@ -1223,12 +1252,13 @@ function setupGalleryObserver(): void {
   }
   galleryObserver = new IntersectionObserver((entries) => {
     if (entries.some((entry) => entry.isIntersecting)) {
-      void loadMoreGallery()
+      void loadVisibleGalleryPages()
     }
   }, {
     rootMargin: '40px 0px'
   })
   galleryObserver.observe(gallerySentinel.value)
+  void loadVisibleGalleryPages()
 }
 
 function imageMatchesGalleryItem(image: GeneratedImage, item: GalleryItem): boolean {
@@ -2243,6 +2273,16 @@ async function refreshBalanceOnly(): Promise<void> {
 }
 
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
+
+watch(activeView, async (view) => {
+  if (view !== 'gallery') {
+    galleryObserver?.disconnect()
+    galleryObserver = null
+    return
+  }
+  await nextTick()
+  setupGalleryObserver()
+})
 
 function makeMockSvg(bg: string, label: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="${bg}"/><text x="256" y="256" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="26" fill="rgba(255,255,255,0.6)">${label}</text></svg>`
