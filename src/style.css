@@ -593,6 +593,87 @@ h2 {
   width: min(240px, 100%);
 }
 
+.library-filter-menu {
+  position: relative;
+  width: min(240px, 100%);
+}
+
+.library-filter-menu summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 0.86rem 0.95rem;
+  color: var(--ink);
+  background: var(--control-bg);
+  cursor: pointer;
+}
+
+.library-filter-menu summary::-webkit-details-marker {
+  display: none;
+}
+
+.library-filter-menu summary svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  flex: none;
+  transition: transform 160ms ease;
+}
+
+.library-filter-menu[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.library-filter-menu-list {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--paper-strong);
+  box-shadow: var(--shadow);
+}
+
+.library-filter-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 0.7rem 0.8rem;
+  border-radius: 14px;
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+  text-align: left;
+}
+
+.library-filter-option small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.library-filter-option.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .library-count {
   margin-left: auto;
   color: var(--muted);

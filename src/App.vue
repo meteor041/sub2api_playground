@@ -157,6 +157,7 @@ const libraryTagFilter = ref('')
 const libraryFavoriteOnly = ref(false)
 const libraryFolders = ref<LibraryFacet[]>([])
 const libraryTags = ref<LibraryFacet[]>([])
+const libraryFolderMenu = ref<HTMLDetailsElement | null>(null)
 const librarySelectedIds = ref<string[]>([])
 const libraryBatchFolder = ref('')
 const libraryBatchTags = ref('')
@@ -911,6 +912,12 @@ const hasLibraryFilters = computed(() => (
   libraryFavoriteOnly.value
 ))
 
+const libraryFolderFilterSummary = computed(() => (
+  libraryFolderFilter.value
+    ? libraryFolderLabel(libraryFolderFilter.value === '__none' ? '' : libraryFolderFilter.value)
+    : '全部文件夹'
+))
+
 function triggerDownload(url: string, filename: string): void {
   const anchor = document.createElement('a')
   anchor.href = url
@@ -1427,6 +1434,11 @@ function clearLibraryFilters(): void {
   libraryFolderFilter.value = ''
   libraryTagFilter.value = ''
   libraryFavoriteOnly.value = false
+}
+
+function setLibraryFolderFilter(value: string): void {
+  libraryFolderFilter.value = value
+  libraryFolderMenu.value?.removeAttribute('open')
 }
 
 async function refreshLibrary(): Promise<void> {
@@ -2942,12 +2954,35 @@ onBeforeUnmount(() => {
         </header>
 
         <div class="library-filter-row">
-          <select v-model="libraryFolderFilter" title="文件夹">
-            <option value="">全部文件夹</option>
-            <option v-for="folder in libraryFolders" :key="`folder-${folder.name || 'none'}`" :value="folder.name || '__none'">
-              {{ libraryFolderLabel(folder.name) }} · {{ folder.count }}
-            </option>
-          </select>
+          <details ref="libraryFolderMenu" class="library-filter-menu">
+            <summary :title="libraryFolderFilterSummary">
+              <span>{{ libraryFolderFilterSummary }}</span>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </summary>
+            <div class="library-filter-menu-list" role="listbox" aria-label="文件夹筛选">
+              <button
+                class="library-filter-option"
+                :class="{ active: libraryFolderFilter === '' }"
+                type="button"
+                @click="setLibraryFolderFilter('')"
+              >
+                <span>全部文件夹</span>
+              </button>
+              <button
+                v-for="folder in libraryFolders"
+                :key="`folder-${folder.name || 'none'}`"
+                class="library-filter-option"
+                :class="{ active: libraryFolderFilter === (folder.name || '__none') }"
+                type="button"
+                @click="setLibraryFolderFilter(folder.name || '__none')"
+              >
+                <span>{{ libraryFolderLabel(folder.name) }}</span>
+                <small>{{ folder.count }}</small>
+              </button>
+            </div>
+          </details>
           <select v-model="libraryTagFilter" title="标签">
             <option value="">全部标签</option>
             <option v-for="tag in libraryTags" :key="`tag-${tag.name}`" :value="tag.name">
