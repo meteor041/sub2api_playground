@@ -1339,8 +1339,13 @@ h2 {
 
 .composer-icon-button.send {
   color: #fff;
-  background: var(--ink);
+  background: var(--accent);
   outline: 0;
+  box-shadow: 0 12px 24px rgba(255, 79, 46, 0.22);
+}
+
+:root[data-theme="dark"] .composer-icon-button.send {
+  color: #111827;
 }
 
 .composer-icon-button svg {
