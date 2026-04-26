@@ -328,6 +328,45 @@ R2_SECRET_ACCESS_KEY=your-secret-access-key
 PLAYGROUND_KEEP_LOCAL_ASSETS=false
 ```
 
+## 最小监控
+
+仓库内置了一个单机巡检脚本：
+
+- [scripts/check-playground.sh](/root/sub2api_playground/scripts/check-playground.sh)
+
+它会检查：
+
+- `http://127.0.0.1:8081/health`
+- PostgreSQL 容器 `pg_isready`
+- 最近一次备份是否存在且不超过设定时效
+- 磁盘剩余空间是否低于阈值
+
+如果你要覆盖默认参数，可以在项目根目录创建未提交的 `check.env`：
+
+```bash
+HEALTHCHECK_URL=http://127.0.0.1:8081/health
+POSTGRES_CONTAINER=sub2api_postgres
+POSTGRES_DB=sub2api_playground
+POSTGRES_USER=neondb_owner
+BACKUP_ROOT=/root/sub2api_playground/backups/playground
+MAX_BACKUP_AGE_HOURS=30
+MIN_DISK_FREE_MB=2048
+DATA_PATH_TO_CHECK=/root/sub2api_playground
+```
+
+手动执行：
+
+```bash
+cd /root/sub2api_playground
+bash scripts/check-playground.sh
+```
+
+可以用 `cron` 每 5 分钟跑一次：
+
+```bash
+*/5 * * * * cd /root/sub2api_playground && /usr/bin/bash scripts/check-playground.sh >> /var/log/sub2api-playground-check.log 2>&1
+```
+
 ## 说明
 
 - 当前后端图片模型名称是 `gpt-image-2`。如果前端想展示成 `image-gpt-2`，可以只做显示别名，实际请求仍然发送 `gpt-image-2`。
