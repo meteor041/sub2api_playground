@@ -259,6 +259,42 @@ const selectedImageIndex = computed(() => (
   generatedImages.value.findIndex((image, index) => imageShareKey(image, index) === selectedImageKey.value)
 ))
 
+function imagePromptGroupKey(image: GeneratedImage): string {
+  return image.prompt.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+const generatedImageGroups = computed<GeneratedImageGroup[]>(() => {
+  const groups = new Map<string, GeneratedImageGroup>()
+
+  generatedImages.value.forEach((image, index) => {
+    const key = imagePromptGroupKey(image) || `ungrouped:${imageShareKey(image, index)}`
+    const existing = groups.get(key)
+    if (existing) {
+      existing.images.push({ image, index })
+      return
+    }
+    groups.set(key, {
+      key,
+      prompt: image.prompt,
+      images: [{ image, index }]
+    })
+  })
+
+  return Array.from(groups.values())
+})
+
+const comparableGeneratedImageGroups = computed(() => (
+  generatedImageGroups.value.filter((group) => group.images.length > 1)
+))
+
+const displayImageCompareGroup = computed(() => {
+  if (!displayImage.value || isImageLoading(displayImage.value)) {
+    return null
+  }
+  const key = imagePromptGroupKey(displayImage.value)
+  return comparableGeneratedImageGroups.value.find((group) => group.key === key) || null
+})
+
 const canSubmitLocalEdit = computed(() => (
   Boolean(selectedImage.value || selectedLibraryItem.value) &&
   Boolean(selectedKeySecret.value) &&
@@ -321,6 +357,17 @@ interface DisplayImageSource {
   src: string
   fallbackSrc: string
   downloadSrc: string
+}
+
+interface GeneratedImageGroupEntry {
+  image: GeneratedImage
+  index: number
+}
+
+interface GeneratedImageGroup {
+  key: string
+  prompt: string
+  images: GeneratedImageGroupEntry[]
 }
 
 interface StandalonePreviewImage {
@@ -677,6 +724,10 @@ function canvasNavigate(direction: -1 | 1): void {
   const count = generatedImages.value.length
   if (count < 2) return
   canvasImageIndex.value = (displayImageIndex.value + direction + count) % count
+}
+
+function selectCanvasImage(index: number): void {
+  canvasImageIndex.value = index
 }
 
 function openGalleryModal(item: GalleryItem): void {
@@ -3352,6 +3403,30 @@ onBeforeUnmount(() => {
                     </svg>
                   </button>
                 </div>
+                <section v-if="displayImageCompareGroup" class="compare-panel">
+                  <div class="compare-panel-header">
+                    <strong>多版本对比</strong>
+                    <span>{{ displayImageCompareGroup.images.length }} 个版本</span>
+                  </div>
+                  <div class="compare-grid">
+                    <button
+                      v-for="entry in displayImageCompareGroup.images"
+                      :key="imageShareKey(entry.image, entry.index)"
+                      class="compare-card"
+                      :class="{ active: entry.index === displayImageIndex }"
+                      type="button"
+                      @click="selectCanvasImage(entry.index)"
+                    >
+                      <img
+                        :src="imagePreviewUrl(entry.image, galleryPreviewWidth)"
+                        :alt="entry.image.prompt"
+                        loading="lazy"
+                        @error="handleGeneratedImageError($event, entry.image)"
+                      />
+                      <span>{{ entry.index + 1 }}</span>
+                    </button>
+                  </div>
+                </section>
               </div>
               <div v-else class="canvas-empty">
                 <svg viewBox="0 0 24 24" aria-hidden="true" style="width:48px;height:48px;opacity:0.25;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round">
@@ -3674,6 +3749,18 @@ onBeforeUnmount(() => {
             <div class="work-tab-header">
               <span class="eyebrow">Images</span>
               <span class="pill">{{ imageModel }}</span>
+            </div>
+            <div v-if="comparableGeneratedImageGroups.length > 0" class="compare-groups">
+              <button
+                v-for="group in comparableGeneratedImageGroups"
+                :key="group.key"
+                class="compare-group-chip"
+                type="button"
+                @click="selectCanvasImage(group.images[0].index)"
+              >
+                <span>{{ group.images.length }} 个版本</span>
+                <small>{{ group.prompt }}</small>
+              </button>
             </div>
             <div class="local-gallery work-scroll">
               <article
