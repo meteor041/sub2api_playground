@@ -199,6 +199,7 @@ const pptBusy = ref(false)
 const pptSelectedModel = ref(textModels[0])
 const pptPlan = ref<PptPlanResult | null>(null)
 const pptCurrentSlideIndex = ref(0)
+const pptSlideEditPrompt = ref('')
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -1160,28 +1161,39 @@ function normalizePptPlan(plan: Partial<PptPlanResult>): PptPlanResult {
   }
 }
 
+function normalizePptSlides(slides: Partial<PptSlidePlan>[]): PptSlidePlan[] {
+  return slides.map((slide, index) => normalizePptSlide({
+    ...slide,
+    pageNumber: index + 1
+  }, index + 1))
+}
+
 function currentPptWorkspaceState(): PptWorkspaceState {
+  const normalizedPlan = pptPlan.value ? normalizePptPlan(pptPlan.value) : null
   return {
     prompt: pptPrompt.value,
     style: pptStyle.value,
     designDetails: pptDesignDetails.value,
-    pageCount: Math.min(Math.max(Number(pptPageCount.value) || 0, 1), 30),
+    pageCount: normalizedPlan?.slides.length || Math.min(Math.max(Number(pptPageCount.value) || 0, 1), 30),
     model: pptSelectedModel.value,
-    plan: pptPlan.value ? normalizePptPlan(pptPlan.value) : null
+    plan: normalizedPlan
   }
 }
 
 function applyPptWorkspaceState(state?: Partial<PptWorkspaceState> | null): void {
+  const normalizedPlan = state?.plan ? normalizePptPlan(state.plan) : null
   pptPrompt.value = typeof state?.prompt === 'string' ? state.prompt : ''
   pptStyle.value = typeof state?.style === 'string' ? state.style : ''
   pptDesignDetails.value = typeof state?.designDetails === 'string' ? state.designDetails : ''
-  pptPageCount.value = Number.isFinite(Number(state?.pageCount))
-    ? Math.min(Math.max(Number(state?.pageCount), 1), 30)
-    : 8
+  pptPageCount.value = normalizedPlan?.slides.length
+    ? normalizedPlan.slides.length
+    : (Number.isFinite(Number(state?.pageCount))
+      ? Math.min(Math.max(Number(state?.pageCount), 1), 30)
+      : 8)
   pptSelectedModel.value = typeof state?.model === 'string' && textModels.includes(state.model)
     ? state.model
     : textModels[0]
-  pptPlan.value = state?.plan ? normalizePptPlan(state.plan) : null
+  pptPlan.value = normalizedPlan
   pptCurrentSlideIndex.value = 0
 }
 
@@ -1232,6 +1244,31 @@ function buildMockPptPlan(prompt: string, style: string, details: string, pageCo
       ].join(' ')
     }))
   }
+}
+
+function buildMockPptSlide(pageNumber: number, instruction: string, titleSeed: string): PptSlidePlan {
+  const detail = instruction.trim() || '延续整套风格并强化这一页的信息表达'
+  return normalizePptSlide({
+    pageNumber,
+    title: titleSeed || `第 ${pageNumber} 页内容`,
+    objective: `围绕当前主题补充第 ${pageNumber} 页的关键信息。`,
+    keyPoints: [
+      '保留统一视觉语言',
+      '只突出一个主结论',
+      '加入适当的数据或示意图支撑'
+    ],
+    layout: '标题区 + 重点内容区 + 辅助视觉区的三段式布局',
+    visualDirection: pptPlan.value?.visualSystem || pptStyle.value || '现代商务风',
+    speakerNotes: '这一页用于承接上下文，强调单页重点，控制讲述节奏。',
+    generationPrompt: `制作 PPT 第 ${pageNumber} 页，主题是：${titleSeed || `第 ${pageNumber} 页内容`}。补充要求：${detail}。保持与整套 PPT 一致的视觉系统和叙事方式。`
+  }, pageNumber)
+}
+
+async function persistPptConversationState(): Promise<void> {
+  if (!currentConversationId.value) {
+    return
+  }
+  await saveConversationSnapshot(currentConversationId.value, chatMessages.value, generatedImages.value)
 }
 
 function persistPptDraft(): void {
@@ -3080,9 +3117,157 @@ async function handleGeneratePptPlan(): Promise<void> {
   }
 }
 
+async function requestSinglePptSlide(operation: 'rewrite' | 'insert'): Promise<PptSlidePlan> {
+  const apiKey = selectedKeySecret.value
+  const currentSlide = currentPptSlide.value
+  const plan = pptPlan.value
+  if (!apiKey) {
+    throw new Error('请先选择或创建一个 OpenAI 分组 API Key。')
+  }
+  if (!plan || !currentSlide) {
+    throw new Error('当前没有可编辑的 PPT 页面。')
+  }
+
+  if (ENABLE_MOCK) {
+    return buildMockPptSlide(
+      operation === 'insert' ? currentPptSlide.value.pageNumber + 1 : currentPptSlide.value.pageNumber,
+      pptSlideEditPrompt.value,
+      operation === 'insert' ? '新增补充页' : `${currentSlide.title}（重写）`
+    )
+  }
+
+  const instructions = [
+    '你是一名资深演示设计总监和信息架构师。',
+    '你的任务是只返回一页 PPT 的严格 JSON。',
+    '不要返回 markdown，不要解释，不要返回数组或额外字段。',
+    '返回字段必须是：pageNumber,title,objective,keyPoints,layout,visualDirection,speakerNotes,generationPrompt。',
+    '必须延续整套 PPT 的风格、叙事顺序和信息密度。',
+    operation === 'rewrite'
+      ? '这是对当前页的重写，不要偏离该页在整套文稿中的角色。'
+      : '这是插入在当前页后的新页，需要自然承接前后页内容。'
+  ].join(' ')
+
+  const response = await sendResponsesRequest(apiKey, {
+    model: pptSelectedModel.value,
+    instructions,
+    input: [{
+      role: 'user',
+      content: [{
+        type: 'input_text',
+        text: [
+          `projectTitle: ${plan.projectTitle}`,
+          `summary: ${plan.summary}`,
+          `targetAudience: ${plan.targetAudience}`,
+          `narrativeFlow: ${plan.narrativeFlow}`,
+          `visualSystem: ${plan.visualSystem}`,
+          `globalPrompt: ${pptPrompt.value}`,
+          `globalStyle: ${pptStyle.value || plan.visualSystem}`,
+          `globalDesignDetails: ${pptDesignDetails.value || plan.summary}`,
+          `operation: ${operation}`,
+          `currentSlideIndex: ${pptCurrentSlideIndex.value + 1}`,
+          `currentSlide: ${JSON.stringify(currentSlide)}`,
+          `allSlideTitles: ${plan.slides.map((slide, index) => `${index + 1}.${slide.title}`).join(' | ')}`,
+          `userInstruction: ${pptSlideEditPrompt.value.trim() || (operation === 'rewrite' ? '优化这一页的信息表达和版式。' : '补充一页自然承接上下文的新内容。')}`,
+          '请只返回单个 JSON 对象。'
+        ].join('\n')
+      }]
+    }]
+  })
+
+  ensureResponseSucceeded(response)
+  const parsed = JSON.parse(extractJsonBlock(extractResponseText(response))) as Partial<PptSlidePlan>
+  return normalizePptSlide(parsed, currentSlide.pageNumber)
+}
+
+async function handleRewriteCurrentPptSlide(): Promise<void> {
+  if (!pptPlan.value || !currentPptSlide.value) {
+    setError('当前没有可重写的页面。')
+    return
+  }
+
+  pptBusy.value = true
+  try {
+    const rewrittenSlide = await requestSinglePptSlide('rewrite')
+    const slides = [...pptPlan.value.slides]
+    slides.splice(pptCurrentSlideIndex.value, 1, rewrittenSlide)
+    pptPlan.value = {
+      ...pptPlan.value,
+      slides: normalizePptSlides(slides)
+    }
+    pptSlideEditPrompt.value = ''
+    await persistPptConversationState()
+    await refreshBalanceOnly()
+    setSuccess('当前页已重写。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '重写当前页失败')
+  } finally {
+    pptBusy.value = false
+  }
+}
+
+async function handleInsertPptSlideAfter(): Promise<void> {
+  if (!pptPlan.value || !currentPptSlide.value) {
+    setError('当前没有可插页的位置。')
+    return
+  }
+  if (pptPlan.value.slides.length >= 30) {
+    setError('最多只支持 30 页。')
+    return
+  }
+
+  pptBusy.value = true
+  try {
+    const insertedSlide = await requestSinglePptSlide('insert')
+    const slides = [...pptPlan.value.slides]
+    slides.splice(pptCurrentSlideIndex.value + 1, 0, insertedSlide)
+    const normalizedSlides = normalizePptSlides(slides)
+    pptPlan.value = {
+      ...pptPlan.value,
+      slides: normalizedSlides
+    }
+    pptPageCount.value = normalizedSlides.length
+    pptCurrentSlideIndex.value = Math.min(pptCurrentSlideIndex.value + 1, normalizedSlides.length - 1)
+    pptSlideEditPrompt.value = ''
+    await persistPptConversationState()
+    await refreshBalanceOnly()
+    setSuccess('已在当前页后插入新页。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '插入新页失败')
+  } finally {
+    pptBusy.value = false
+  }
+}
+
+async function handleDeleteCurrentPptSlide(): Promise<void> {
+  if (!pptPlan.value || !currentPptSlide.value) {
+    setError('当前没有可删除的页面。')
+    return
+  }
+  if (pptPlan.value.slides.length <= 1) {
+    setError('至少保留 1 页，不能删除最后一页。')
+    return
+  }
+
+  const slides = [...pptPlan.value.slides]
+  slides.splice(pptCurrentSlideIndex.value, 1)
+  const normalizedSlides = normalizePptSlides(slides)
+  pptPlan.value = {
+    ...pptPlan.value,
+    slides: normalizedSlides
+  }
+  pptPageCount.value = normalizedSlides.length
+  pptCurrentSlideIndex.value = Math.max(0, Math.min(pptCurrentSlideIndex.value, normalizedSlides.length - 1))
+  await persistPptConversationState()
+  setSuccess('当前页已删除。')
+}
+
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
-watch(() => pptSlides.value.length, () => {
-  pptCurrentSlideIndex.value = 0
+watch(() => pptSlides.value.length, (length) => {
+  if (length <= 0) {
+    pptCurrentSlideIndex.value = 0
+    return
+  }
+  pptCurrentSlideIndex.value = Math.min(pptCurrentSlideIndex.value, length - 1)
 })
 watch([pptPrompt, pptStyle, pptDesignDetails, pptPageCount, pptSelectedModel, pptPlan], () => {
   persistPptDraft()
@@ -3604,6 +3789,30 @@ onBeforeUnmount(() => {
               <button
                 class="ghost mini"
                 type="button"
+                :disabled="pptBusy || !currentPptSlide"
+                @click="handleRewriteCurrentPptSlide"
+              >
+                重写当前页
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="pptBusy || !currentPptSlide || pptSlides.length >= 30"
+                @click="handleInsertPptSlideAfter"
+              >
+                后插一页
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="pptBusy || !currentPptSlide || pptSlides.length <= 1"
+                @click="handleDeleteCurrentPptSlide"
+              >
+                删除当前页
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
                 :disabled="!currentPptSlide"
                 @click="copyText(currentPptSlide?.generationPrompt || '', '当前页提示词已复制。')"
               >
@@ -3758,6 +3967,25 @@ onBeforeUnmount(() => {
               {{ pptBusy ? '生成中...' : '生成分页方案' }}
             </button>
           </form>
+
+          <div v-if="pptPlan && currentPptSlide" class="ppt-slide-editor">
+            <label>
+              当前页编辑指令
+              <textarea
+                v-model="pptSlideEditPrompt"
+                rows="4"
+                placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+              />
+            </label>
+            <div class="ppt-editor-actions">
+              <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
+                重写当前页
+              </button>
+              <button class="secondary mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click="handleInsertPptSlideAfter">
+                插入新页
+              </button>
+            </div>
+          </div>
 
           <div v-if="pptPlan" class="ppt-plan-summary">
             <section>

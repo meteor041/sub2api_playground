@@ -735,13 +735,25 @@ h2 {
 }
 
 .ppt-form,
-.ppt-plan-summary {
+.ppt-plan-summary,
+.ppt-slide-editor {
   display: grid;
   gap: 14px;
 }
 
 .ppt-form textarea {
   min-height: 0;
+}
+
+.ppt-slide-editor {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.ppt-editor-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .library-header {
