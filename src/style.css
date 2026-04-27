@@ -631,6 +631,41 @@ h2 {
   overflow: hidden;
 }
 
+.ppt-stage-utility {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(17, 24, 39, 0.08);
+}
+
+.ppt-stage-status {
+  color: var(--muted);
+  font-size: 0.84rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ppt-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  box-shadow: none;
+}
+
+.ppt-settings-link svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .ppt-empty-state {
   display: grid;
   place-items: center;
@@ -967,11 +1002,11 @@ h2 {
 .ppt-focus-canvas,
 .ppt-present-sheet {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
+  grid-template-rows: minmax(0, 1fr);
+  place-items: center;
   min-height: 0;
   border-radius: 18px;
-  padding: 22px;
+  padding: 20px;
   border: 1px solid rgba(17, 24, 39, 0.08);
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 22px 54px rgba(15, 23, 42, 0.08);
@@ -991,6 +1026,129 @@ h2 {
   display: grid;
   gap: 16px;
   min-height: 0;
+}
+
+.ppt-focus-stage {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+}
+
+.ppt-focus-slide {
+  width: min(100%, 980px);
+  aspect-ratio: 16 / 9;
+  border-radius: 28px;
+  padding: 18px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 125, 78, 0.15), transparent 30%),
+    linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 250, 0.92));
+  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.12);
+}
+
+.ppt-focus-slide-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 18px;
+  padding: 28px;
+  border-radius: 22px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(18px);
+}
+
+.ppt-focus-slide-shell.present {
+  width: 100%;
+}
+
+.ppt-focus-slide-header {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.ppt-focus-slide-header strong {
+  font-size: clamp(1.9rem, 2.8vw, 3.6rem);
+  line-height: 1.04;
+  letter-spacing: -0.06em;
+}
+
+.ppt-focus-slide-header p,
+.ppt-focus-slide-meta p {
+  color: var(--muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.ppt-focus-slide-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(260px, 0.78fr);
+  gap: 18px;
+}
+
+.ppt-focus-slide-points,
+.ppt-focus-slide-meta {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.ppt-focus-slide-points {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(17, 24, 39, 0.06);
+}
+
+.ppt-focus-slide-points ul {
+  margin: 0;
+  padding-left: 1.15rem;
+  color: var(--ink);
+  line-height: 1.7;
+}
+
+.ppt-focus-slide-aside {
+  min-height: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: 14px;
+}
+
+.ppt-focus-slide-visual {
+  overflow: hidden;
+  border-radius: 18px;
+  min-height: 0;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(226, 232, 240, 0.9));
+  border: 1px solid rgba(17, 24, 39, 0.06);
+}
+
+.ppt-focus-slide-visual img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ppt-focus-slide-visual.placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: clamp(2rem, 4vw, 3.4rem);
+}
+
+.ppt-focus-slide-meta {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ppt-focus-slide-meta > div {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .ppt-present-modal {
@@ -1053,6 +1211,24 @@ h2 {
 :root[data-theme="dark"] .ppt-task-record,
 :root[data-theme="dark"] .ppt-task-records {
   background: rgba(15, 23, 42, 0.52);
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
+:root[data-theme="dark"] .ppt-stage-utility {
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
+:root[data-theme="dark"] .ppt-focus-slide {
+  background:
+    radial-gradient(circle at top left, rgba(255, 125, 78, 0.18), transparent 32%),
+    linear-gradient(145deg, rgba(17, 24, 39, 0.98), rgba(25, 34, 50, 0.94));
+}
+
+:root[data-theme="dark"] .ppt-focus-slide-shell,
+:root[data-theme="dark"] .ppt-focus-slide-points,
+:root[data-theme="dark"] .ppt-focus-slide-meta > div,
+:root[data-theme="dark"] .ppt-focus-slide-visual {
+  background: rgba(15, 23, 42, 0.6);
   border-color: rgba(226, 232, 240, 0.08);
 }
 
@@ -2941,12 +3117,22 @@ h2 {
   .ppt-hero-actions,
   .ppt-editor-topbar-actions,
   .ppt-editor-actions,
-  .ppt-drawer-header-actions {
+  .ppt-drawer-header-actions,
+  .ppt-stage-utility {
     flex-direction: column;
     align-items: stretch;
   }
 
   .ppt-slide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ppt-focus-slide {
+    width: 100%;
+  }
+
+  .ppt-focus-slide-body,
+  .ppt-focus-slide-meta {
     grid-template-columns: 1fr;
   }
 

@@ -4499,16 +4499,6 @@ onBeforeUnmount(() => {
                   <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
                 </svg>
               </button>
-              <button
-                class="ghost mini icon-button"
-                type="button"
-                aria-label="打开设置"
-                @click="pptConfigPanelOpen = true"
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M10.3 4.3a1 1 0 0 1 1.4 0l.9.9a1 1 0 0 0 1.02.24l1.23-.37a1 1 0 0 1 1.23.67l.38 1.23a1 1 0 0 0 .74.7l1.25.3a1 1 0 0 1 .74 1.13l-.16 1.28a1 1 0 0 0 .33.99l.97.86a1 1 0 0 1 0 1.48l-.97.86a1 1 0 0 0-.33.99l.16 1.28a1 1 0 0 1-.74 1.13l-1.25.3a1 1 0 0 0-.74.7l-.38 1.23a1 1 0 0 1-1.23.67l-1.23-.37a1 1 0 0 0-1.02.24l-.9.9a1 1 0 0 1-1.4 0l-.9-.9a1 1 0 0 0-1.02-.24l-1.23.37a1 1 0 0 1-1.23-.67l-.38-1.23a1 1 0 0 0-.74-.7l-1.25-.3a1 1 0 0 1-.74-1.13l.16-1.28a1 1 0 0 0-.33-.99l-.97-.86a1 1 0 0 1 0-1.48l.97-.86a1 1 0 0 0 .33-.99l-.16-1.28a1 1 0 0 1 .74-1.13l1.25-.3a1 1 0 0 0 .74-.7l.38-1.23a1 1 0 0 1 1.23-.67l1.23.37a1 1 0 0 0 1.02-.24zM12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
-                </svg>
-              </button>
             </div>
           </header>
 
@@ -4583,6 +4573,16 @@ onBeforeUnmount(() => {
               </div>
             </div>
           </div>
+
+          <footer class="ppt-stage-utility">
+            <span class="ppt-stage-status">{{ pptTaskLabel || (pptSlides.length > 0 ? `当前共 ${pptSlides.length} 页` : '准备开始新的 PPT 任务') }}</span>
+            <button class="ghost mini ppt-settings-link" type="button" @click="pptConfigPanelOpen = true">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M10.3 4.3a1 1 0 0 1 1.4 0l.9.9a1 1 0 0 0 1.02.24l1.23-.37a1 1 0 0 1 1.23.67l.38 1.23a1 1 0 0 0 .74.7l1.25.3a1 1 0 0 1 .74 1.13l-.16 1.28a1 1 0 0 0 .33.99l.97.86a1 1 0 0 1 0 1.48l-.97.86a1 1 0 0 0-.33.99l.16 1.28a1 1 0 0 1-.74 1.13l-1.25.3a1 1 0 0 0-.74.7l-.38 1.23a1 1 0 0 1-1.23.67l-1.23-.37a1 1 0 0 0-1.02.24l-.9.9a1 1 0 0 1-1.4 0l-.9-.9a1 1 0 0 0-1.02-.24l-1.23.37a1 1 0 0 1-1.23-.67l-.38-1.23a1 1 0 0 0-.74-.7l-1.25-.3a1 1 0 0 1-.74-1.13l.16-1.28a1 1 0 0 0-.33-.99l-.97-.86a1 1 0 0 1 0-1.48l.97-.86a1 1 0 0 0 .33-.99l-.16-1.28a1 1 0 0 1 .74-1.13l1.25-.3a1 1 0 0 0 .74-.7l.38-1.23a1 1 0 0 1 1.23-.67l1.23.37a1 1 0 0 0 1.02-.24zM12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+              </svg>
+              设置
+            </button>
+          </footer>
         </section>
 
         <div v-if="pptEditorOpen && currentPptSlide" class="ppt-editor-modal-backdrop" @click="closePptSlideEditor"></div>
@@ -4615,32 +4615,48 @@ onBeforeUnmount(() => {
               </button>
             </aside>
             <article class="ppt-focus-canvas">
-              <header class="ppt-slide-header">
-                <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
-                <strong>{{ currentPptSlide.title }}</strong>
-                <p>{{ currentPptSlide.objective }}</p>
-              </header>
-              <div class="ppt-focus-canvas-body">
-                <section class="ppt-slide-points">
-                  <span class="ppt-slide-label">核心内容</span>
-                  <ul>
-                    <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
-                  </ul>
-                </section>
-                <div class="ppt-slide-grid">
-                  <section>
-                    <span class="ppt-slide-label">版式</span>
-                    <p>{{ currentPptSlide.layout }}</p>
-                  </section>
-                  <section>
-                    <span class="ppt-slide-label">视觉方向</span>
-                    <p>{{ currentPptSlide.visualDirection }}</p>
-                  </section>
-                </div>
-                <section class="ppt-slide-notes">
-                  <span class="ppt-slide-label">讲述建议</span>
-                  <p>{{ currentPptSlide.speakerNotes }}</p>
-                </section>
+              <div class="ppt-focus-stage">
+                <article class="ppt-focus-slide">
+                  <div class="ppt-focus-slide-shell">
+                    <header class="ppt-focus-slide-header">
+                      <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+                      <strong>{{ currentPptSlide.title }}</strong>
+                      <p>{{ currentPptSlide.objective }}</p>
+                    </header>
+                    <div class="ppt-focus-slide-body">
+                      <section class="ppt-focus-slide-points">
+                        <span class="ppt-slide-label">核心内容</span>
+                        <ul>
+                          <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                        </ul>
+                      </section>
+                      <aside class="ppt-focus-slide-aside">
+                        <div v-if="currentPptSlideImage" class="ppt-focus-slide-visual">
+                          <img
+                            :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                            :alt="currentPptSlide.title"
+                            loading="lazy"
+                            @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                            @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
+                          />
+                        </div>
+                        <div v-else class="ppt-focus-slide-visual placeholder">
+                          <span>{{ pptCurrentSlideIndex % 3 === 0 ? '📊' : pptCurrentSlideIndex % 3 === 1 ? '💡' : '📈' }}</span>
+                        </div>
+                        <section class="ppt-focus-slide-meta">
+                          <div>
+                            <span class="ppt-slide-label">版式</span>
+                            <p>{{ currentPptSlide.layout }}</p>
+                          </div>
+                          <div>
+                            <span class="ppt-slide-label">视觉方向</span>
+                            <p>{{ currentPptSlide.visualDirection }}</p>
+                          </div>
+                        </section>
+                      </aside>
+                    </div>
+                  </div>
+                </article>
               </div>
             </article>
             <aside class="ppt-focus-editor">
@@ -4723,17 +4739,34 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <article class="ppt-present-sheet">
-            <header class="ppt-slide-header">
-              <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
-              <strong>{{ currentPptSlide.title }}</strong>
-              <p>{{ currentPptSlide.objective }}</p>
-            </header>
-            <section class="ppt-slide-points">
-              <span class="ppt-slide-label">核心内容</span>
-              <ul>
-                <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`present-${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
-              </ul>
-            </section>
+            <div class="ppt-focus-slide-shell present">
+              <header class="ppt-focus-slide-header">
+                <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+                <strong>{{ currentPptSlide.title }}</strong>
+                <p>{{ currentPptSlide.objective }}</p>
+              </header>
+              <div class="ppt-focus-slide-body">
+                <section class="ppt-focus-slide-points">
+                  <span class="ppt-slide-label">核心内容</span>
+                  <ul>
+                    <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`present-${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                  </ul>
+                </section>
+                <aside class="ppt-focus-slide-aside">
+                  <div v-if="currentPptSlideImage" class="ppt-focus-slide-visual">
+                    <img
+                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                      :alt="currentPptSlide.title"
+                      loading="lazy"
+                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                    />
+                  </div>
+                  <div v-else class="ppt-focus-slide-visual placeholder">
+                    <span>{{ pptCurrentSlideIndex % 3 === 0 ? '📊' : pptCurrentSlideIndex % 3 === 1 ? '💡' : '📈' }}</span>
+                  </div>
+                </aside>
+              </div>
+            </div>
           </article>
         </section>
 
