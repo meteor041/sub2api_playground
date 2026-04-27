@@ -4366,48 +4366,54 @@ onBeforeUnmount(() => {
                   <strong>{{ currentPptSlide.title }}</strong>
                   <p>{{ currentPptSlide.objective }}</p>
                 </header>
-                <div class="ppt-slide-grid">
-                  <section>
-                    <span class="ppt-slide-label">版式</span>
-                    <p>{{ currentPptSlide.layout }}</p>
-                  </section>
-                  <section>
-                    <span class="ppt-slide-label">视觉方向</span>
-                    <p>{{ currentPptSlide.visualDirection }}</p>
-                  </section>
+                <div class="ppt-slide-body">
+                  <div class="ppt-slide-column ppt-slide-column-main">
+                    <div class="ppt-slide-grid">
+                      <section>
+                        <span class="ppt-slide-label">版式</span>
+                        <p>{{ currentPptSlide.layout }}</p>
+                      </section>
+                      <section>
+                        <span class="ppt-slide-label">视觉方向</span>
+                        <p>{{ currentPptSlide.visualDirection }}</p>
+                      </section>
+                    </div>
+                    <section class="ppt-slide-points">
+                      <span class="ppt-slide-label">核心内容</span>
+                      <ul>
+                        <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                      </ul>
+                    </section>
+                    <section class="ppt-slide-notes">
+                      <span class="ppt-slide-label">讲述建议</span>
+                      <p>{{ currentPptSlide.speakerNotes }}</p>
+                    </section>
+                  </div>
+                  <div class="ppt-slide-column ppt-slide-column-side">
+                    <section class="ppt-slide-image-panel">
+                      <span class="ppt-slide-label">本页配图</span>
+                      <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
+                        <img
+                          :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                          :alt="currentPptSlide.title"
+                          loading="lazy"
+                          @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                          @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
+                        />
+                      </div>
+                      <div v-else class="ppt-slide-image-empty">
+                        <span>当前页还没有生成配图。</span>
+                        <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                          {{ pptBusy ? '生成中...' : '生成本页图片' }}
+                        </button>
+                      </div>
+                    </section>
+                    <section class="ppt-slide-prompt">
+                      <span class="ppt-slide-label">本页制作 Prompt</span>
+                      <p>{{ currentPptSlide.generationPrompt }}</p>
+                    </section>
+                  </div>
                 </div>
-                <section class="ppt-slide-points">
-                  <span class="ppt-slide-label">核心内容</span>
-                  <ul>
-                    <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
-                  </ul>
-                </section>
-                <section class="ppt-slide-notes">
-                  <span class="ppt-slide-label">讲述建议</span>
-                  <p>{{ currentPptSlide.speakerNotes }}</p>
-                </section>
-                <section class="ppt-slide-prompt">
-                  <span class="ppt-slide-label">本页制作 Prompt</span>
-                  <p>{{ currentPptSlide.generationPrompt }}</p>
-                </section>
-                <section class="ppt-slide-image-panel">
-                  <span class="ppt-slide-label">本页配图</span>
-                  <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
-                    <img
-                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
-                      :alt="currentPptSlide.title"
-                      loading="lazy"
-                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                      @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
-                    />
-                  </div>
-                  <div v-else class="ppt-slide-image-empty">
-                    <span>当前页还没有生成配图。</span>
-                    <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
-                      {{ pptBusy ? '生成中...' : '生成本页图片' }}
-                    </button>
-                  </div>
-                </section>
               </article>
               <button
                 v-if="pptSlides.length > 1"
@@ -4472,145 +4478,149 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <form v-if="pptSidebarTab === 'settings'" class="ppt-form" @submit.prevent="handleGeneratePptPlan">
-            <label>
-              模型
-              <select v-model="pptSelectedModel">
-                <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
-              </select>
-            </label>
-            <label>
-              API Key
-              <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
-                <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
-                  {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
-                </option>
-              </select>
-            </label>
-            <label>
-              页面数量
-              <input v-model.number="pptPageCount" type="number" min="1" max="30" />
-            </label>
-            <label>
-              内容或大纲
-              <textarea
-                v-model="pptPrompt"
-                rows="7"
-                placeholder="例如：为 SaaS 产品 AI 客服解决方案做一套 10 页融资路演 PPT，包含市场痛点、方案、产品演示、商业模式、竞争壁垒和融资计划。"
-              />
-            </label>
-            <label>
-              风格
-              <textarea
-                v-model="pptStyle"
-                rows="3"
-                placeholder="例如：极简科技感、蓝灰商务风、强对比排版、大面积留白。"
-              />
-            </label>
-            <label>
-              细节设计要求
-              <textarea
-                v-model="pptDesignDetails"
-                rows="4"
-                placeholder="例如：每页只保留一个重点，图表优先，标题短促有力度，适合给投资人现场讲解。"
-              />
-            </label>
-            <button class="canvas-submit-btn" type="submit" :disabled="pptBusy || !selectedKeySecret">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M5 12h13M13 6l6 6-6 6" />
-              </svg>
-              {{ pptBusy ? '生成中...' : '生成分页方案' }}
-            </button>
-          </form>
+          <div v-if="pptSidebarTab === 'settings'" class="ppt-sidebar-body">
+            <form class="ppt-form" @submit.prevent="handleGeneratePptPlan">
+              <label>
+                模型
+                <select v-model="pptSelectedModel">
+                  <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+                </select>
+              </label>
+              <label>
+                API Key
+                <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
+                  <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
+                    {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
+                  </option>
+                </select>
+              </label>
+              <label>
+                页面数量
+                <input v-model.number="pptPageCount" type="number" min="1" max="30" />
+              </label>
+              <label>
+                内容或大纲
+                <textarea
+                  v-model="pptPrompt"
+                  rows="7"
+                  placeholder="例如：为 SaaS 产品 AI 客服解决方案做一套 10 页融资路演 PPT，包含市场痛点、方案、产品演示、商业模式、竞争壁垒和融资计划。"
+                />
+              </label>
+              <label>
+                风格
+                <textarea
+                  v-model="pptStyle"
+                  rows="3"
+                  placeholder="例如：极简科技感、蓝灰商务风、强对比排版、大面积留白。"
+                />
+              </label>
+              <label>
+                细节设计要求
+                <textarea
+                  v-model="pptDesignDetails"
+                  rows="4"
+                  placeholder="例如：每页只保留一个重点，图表优先，标题短促有力度，适合给投资人现场讲解。"
+                />
+              </label>
+              <button class="canvas-submit-btn" type="submit" :disabled="pptBusy || !selectedKeySecret">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M5 12h13M13 6l6 6-6 6" />
+                </svg>
+                {{ pptBusy ? '生成中...' : '生成分页方案' }}
+              </button>
+            </form>
 
-          <div v-if="pptSidebarTab === 'settings' && pptPlan && currentPptSlide" class="ppt-slide-editor">
-            <label>
-              当前页编辑指令
-              <textarea
-                v-model="pptSlideEditPrompt"
-                rows="4"
-                placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
-              />
-            </label>
-            <div class="ppt-editor-actions">
-              <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptPresentation">
-                导出 PPTX
-              </button>
-              <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptHtml">
-                导出 HTML
-              </button>
-              <button class="secondary mini" type="button" :disabled="pptBusy || !pptPlan || pptSlides.length === 0" @click="handleGenerateAllPptSlideImages">
-                生成整套图片
-              </button>
-              <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
-                生成本页图片
-              </button>
-              <button
-                class="secondary mini"
-                type="button"
-                :disabled="pptBusy || pptCurrentSlideIndex <= 0"
-                @click="handleMoveCurrentPptSlide(-1)"
-              >
-                上移
-              </button>
-              <button
-                class="secondary mini"
-                type="button"
-                :disabled="pptBusy || pptCurrentSlideIndex >= pptSlides.length - 1"
-                @click="handleMoveCurrentPptSlide(1)"
-              >
-                下移
-              </button>
-              <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
-                重写当前页
-              </button>
-              <button class="secondary mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click="handleInsertPptSlideAfter">
-                插入新页
-              </button>
+            <div v-if="pptPlan && currentPptSlide" class="ppt-slide-editor">
+              <label>
+                当前页编辑指令
+                <textarea
+                  v-model="pptSlideEditPrompt"
+                  rows="4"
+                  placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+                />
+              </label>
+              <div class="ppt-editor-actions">
+                <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptPresentation">
+                  导出 PPTX
+                </button>
+                <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptHtml">
+                  导出 HTML
+                </button>
+                <button class="secondary mini" type="button" :disabled="pptBusy || !pptPlan || pptSlides.length === 0" @click="handleGenerateAllPptSlideImages">
+                  生成整套图片
+                </button>
+                <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                  生成本页图片
+                </button>
+                <button
+                  class="secondary mini"
+                  type="button"
+                  :disabled="pptBusy || pptCurrentSlideIndex <= 0"
+                  @click="handleMoveCurrentPptSlide(-1)"
+                >
+                  上移
+                </button>
+                <button
+                  class="secondary mini"
+                  type="button"
+                  :disabled="pptBusy || pptCurrentSlideIndex >= pptSlides.length - 1"
+                  @click="handleMoveCurrentPptSlide(1)"
+                >
+                  下移
+                </button>
+                <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
+                  重写当前页
+                </button>
+                <button class="secondary mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click="handleInsertPptSlideAfter">
+                  插入新页
+                </button>
+              </div>
+            </div>
+
+            <div v-if="pptPlan" class="ppt-plan-summary">
+              <section>
+                <span class="ppt-slide-label">整套摘要</span>
+                <p>{{ pptPlan.summary }}</p>
+              </section>
+              <section>
+                <span class="ppt-slide-label">受众</span>
+                <p>{{ pptPlan.targetAudience }}</p>
+              </section>
+              <section>
+                <span class="ppt-slide-label">叙事路径</span>
+                <p>{{ pptPlan.narrativeFlow }}</p>
+              </section>
+              <section>
+                <span class="ppt-slide-label">统一视觉系统</span>
+                <p>{{ pptPlan.visualSystem }}</p>
+              </section>
             </div>
           </div>
 
-          <div v-if="pptSidebarTab === 'tasks'" class="ppt-task-records">
-            <div class="ppt-task-records-header">
-              <span class="ppt-slide-label">任务记录</span>
-              <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewPptTask">
-                新建任务
-              </button>
+          <div v-if="pptSidebarTab === 'tasks'" class="ppt-sidebar-body">
+            <div class="ppt-task-records">
+              <div class="ppt-task-records-header">
+                <span class="ppt-slide-label">任务记录</span>
+                <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewPptTask">
+                  新建任务
+                </button>
+              </div>
+              <div class="ppt-task-records-list">
+                <button
+                  v-for="conversation in pptTaskRecords"
+                  :key="conversation.id"
+                  class="ppt-task-record"
+                  :class="{ active: conversation.id === currentConversationId }"
+                  type="button"
+                  :disabled="conversationBusy"
+                  @click="handlePptTaskSelect(conversation.id)"
+                >
+                  <strong>{{ conversation.title }}</strong>
+                  <span>{{ conversation.updatedAt }}</span>
+                </button>
+                <p v-if="pptTaskRecords.length === 0" class="empty">还没有任务记录。</p>
+              </div>
             </div>
-            <div class="ppt-task-records-list">
-              <button
-                v-for="conversation in pptTaskRecords"
-                :key="conversation.id"
-                class="ppt-task-record"
-                :class="{ active: conversation.id === currentConversationId }"
-                type="button"
-                :disabled="conversationBusy"
-                @click="handlePptTaskSelect(conversation.id)"
-              >
-                <strong>{{ conversation.title }}</strong>
-                <span>{{ conversation.updatedAt }}</span>
-              </button>
-              <p v-if="pptTaskRecords.length === 0" class="empty">还没有任务记录。</p>
-            </div>
-          </div>
-
-          <div v-if="pptSidebarTab === 'settings' && pptPlan" class="ppt-plan-summary">
-            <section>
-              <span class="ppt-slide-label">整套摘要</span>
-              <p>{{ pptPlan.summary }}</p>
-            </section>
-            <section>
-              <span class="ppt-slide-label">受众</span>
-              <p>{{ pptPlan.targetAudience }}</p>
-            </section>
-            <section>
-              <span class="ppt-slide-label">叙事路径</span>
-              <p>{{ pptPlan.narrativeFlow }}</p>
-            </section>
-            <section>
-              <span class="ppt-slide-label">统一视觉系统</span>
-              <p>{{ pptPlan.visualSystem }}</p>
-            </section>
           </div>
         </aside>
       </div>
