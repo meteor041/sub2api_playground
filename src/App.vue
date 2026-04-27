@@ -4365,7 +4365,6 @@ onBeforeUnmount(() => {
         <section class="ppt-stage panel">
           <header class="ppt-hero">
             <div class="ppt-hero-copy">
-              <p class="eyebrow">Pitch Deck Studio</p>
               <h1>{{ pptHeroTitle }}</h1>
             </div>
             <div class="ppt-hero-actions">

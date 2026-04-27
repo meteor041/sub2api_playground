@@ -570,9 +570,9 @@ h2 {
 .ppt-stage {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 22px;
+  gap: 18px;
   height: 100%;
-  padding: 26px;
+  padding: 22px 24px 24px;
   border-radius: 28px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.52)),
@@ -598,7 +598,7 @@ h2 {
 
 .ppt-hero-copy {
   display: grid;
-  gap: 8px;
+  gap: 4px;
 }
 
 .ppt-hero-copy h1 {
