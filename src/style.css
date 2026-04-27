@@ -836,6 +836,54 @@ h2 {
   gap: 14px;
 }
 
+.ppt-settings-block {
+  display: grid;
+  gap: 12px;
+}
+
+.ppt-settings-toggle {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  padding: 0.8rem 0.95rem;
+  border-radius: 18px;
+  text-align: left;
+}
+
+.ppt-settings-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ppt-settings-toggle span {
+  font-weight: 700;
+}
+
+.ppt-settings-toggle small {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ppt-settings-popover {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  padding: 16px;
+  background: var(--panel-soft-bg);
+}
+
 .ppt-sidebar-body {
   min-height: 0;
   overflow-y: auto;
@@ -2623,6 +2671,14 @@ h2 {
   .ppt-stage-actions {
     flex-wrap: wrap;
     overflow: visible;
+  }
+
+  .ppt-settings-toggle {
+    grid-template-columns: auto 1fr;
+  }
+
+  .ppt-settings-toggle small {
+    grid-column: 1 / -1;
   }
 
   .ppt-stage-main,

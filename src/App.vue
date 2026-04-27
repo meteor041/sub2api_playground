@@ -205,6 +205,7 @@ const pptPlan = ref<PptPlanResult | null>(null)
 const pptCurrentSlideIndex = ref(0)
 const pptSlideEditPrompt = ref('')
 const pptSidebarTab = ref<'settings' | 'tasks'>('settings')
+const pptSettingsOpen = ref(false)
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -4480,24 +4481,41 @@ onBeforeUnmount(() => {
           </div>
           <div v-if="pptSidebarTab === 'settings'" class="ppt-sidebar-body">
             <form class="ppt-form" @submit.prevent="handleGeneratePptPlan">
-              <label>
-                模型
-                <select v-model="pptSelectedModel">
-                  <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
-                </select>
-              </label>
-              <label>
-                API Key
-                <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
-                  <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
-                    {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
-                  </option>
-                </select>
-              </label>
-              <label>
-                页面数量
-                <input v-model.number="pptPageCount" type="number" min="1" max="30" />
-              </label>
+              <div class="ppt-settings-block">
+                <button
+                  class="ghost mini ppt-settings-toggle"
+                  type="button"
+                  :aria-expanded="pptSettingsOpen"
+                  aria-label="打开 PPT 设置"
+                  @click="pptSettingsOpen = !pptSettingsOpen"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M10.3 4.3a1 1 0 0 1 1.4 0l.9.9a1 1 0 0 0 1.02.24l1.23-.37a1 1 0 0 1 1.23.67l.38 1.23a1 1 0 0 0 .74.7l1.25.3a1 1 0 0 1 .74 1.13l-.16 1.28a1 1 0 0 0 .33.99l.97.86a1 1 0 0 1 0 1.48l-.97.86a1 1 0 0 0-.33.99l.16 1.28a1 1 0 0 1-.74 1.13l-1.25.3a1 1 0 0 0-.74.7l-.38 1.23a1 1 0 0 1-1.23.67l-1.23-.37a1 1 0 0 0-1.02.24l-.9.9a1 1 0 0 1-1.4 0l-.9-.9a1 1 0 0 0-1.02-.24l-1.23.37a1 1 0 0 1-1.23-.67l-.38-1.23a1 1 0 0 0-.74-.7l-1.25-.3a1 1 0 0 1-.74-1.13l.16-1.28a1 1 0 0 0-.33-.99l-.97-.86a1 1 0 0 1 0-1.48l.97-.86a1 1 0 0 0 .33-.99l-.16-1.28a1 1 0 0 1 .74-1.13l1.25-.3a1 1 0 0 0 .74-.7l.38-1.23a1 1 0 0 1 1.23-.67l1.23.37a1 1 0 0 0 1.02-.24zM12 15.2a3.2 3.2 0 1 0 0-6.4 3.2 3.2 0 0 0 0 6.4Z" />
+                  </svg>
+                  <span>设置</span>
+                  <small>{{ pptSelectedModel }} / {{ selectedApiKey?.name || '未选择 Key' }} / {{ pptPageCount }} 页</small>
+                </button>
+                <div v-if="pptSettingsOpen" class="ppt-settings-popover">
+                  <label>
+                    模型
+                    <select v-model="pptSelectedModel">
+                      <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+                    </select>
+                  </label>
+                  <label>
+                    API Key
+                    <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
+                      <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
+                        {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
+                      </option>
+                    </select>
+                  </label>
+                  <label>
+                    页面数量
+                    <input v-model.number="pptPageCount" type="number" min="1" max="30" />
+                  </label>
+                </div>
+              </div>
               <label>
                 内容或大纲
                 <textarea
