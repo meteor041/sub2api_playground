@@ -337,7 +337,7 @@ const currentConversation = computed(() => (
   conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
 
-const createTaskRecords = computed(() => conversations.value.filter((conversation) => (conversation.workspaceType || 'create') === 'create'))
+const createTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'create'))
 const pptTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'ppt'))
 
 const pptSlides = computed(() => pptPlan.value?.slides || [])
@@ -1610,6 +1610,15 @@ async function loadConversationById(conversationId: string): Promise<void> {
   try {
     const payload = await getConversation(conversationId)
     const workspaceType = payload.conversation.workspaceType === 'ppt' ? 'ppt' : 'create'
+    conversations.value = sortConversations(conversations.value.map((conversation) => (
+      conversation.id === payload.conversation.id
+        ? {
+          ...conversation,
+          ...payload.conversation,
+          workspaceType
+        }
+        : conversation
+    )))
     persistActiveConversationId(payload.conversation.id, workspaceType)
     chatMessages.value = payload.state.chatMessages || []
     generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
@@ -3872,7 +3881,7 @@ watch(activeView, async (view) => {
   if (view !== 'gallery') {
     if (isAuthenticated.value && (view === 'create' || view === 'ppt')) {
       const workspaceType = view === 'ppt' ? 'ppt' : 'create'
-      const currentWorkspaceType = currentConversation.value?.workspaceType === 'ppt' ? 'ppt' : 'create'
+      const currentWorkspaceType = currentConversation.value?.workspaceType
       if (!currentConversationId.value || currentWorkspaceType !== workspaceType) {
         await ensureConversationLoaded(workspaceType)
       }
@@ -3926,7 +3935,14 @@ onMounted(async () => {
     activeView.value = 'create'
     await refreshWorkspace()
     profile.value = loginResult.user || profile.value || { id: 1, email: 'test@example.com', username: 'MockUser', role: 'user', status: 'active', balance: 9.52, concurrency: 5 }
-    const mockConv = { id: 'mock-conv-1', title: '霓虹科幻场景', createdAt: new Date(Date.now() - 3600000).toISOString(), updatedAt: new Date().toISOString(), lastMessageAt: new Date().toISOString() }
+    const mockConv = {
+      id: 'mock-conv-1',
+      title: '霓虹科幻场景',
+      workspaceType: 'create' as const,
+      createdAt: new Date(Date.now() - 3600000).toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastMessageAt: new Date().toISOString()
+    }
     conversations.value = [mockConv]
     currentConversationId.value = mockConv.id
     chatMessages.value = mockMessages
