@@ -1262,8 +1262,35 @@ function normalizePptSlides(slides: Partial<PptSlidePlan>[]): PptSlidePlan[] {
   }, index + 1))
 }
 
+function hydratePptPlanSlideImages(
+  plan: PptPlanResult | null,
+  images: GeneratedImage[] = generatedImages.value
+): PptPlanResult | null {
+  if (!plan) {
+    return null
+  }
+
+  return {
+    ...plan,
+    slides: plan.slides.map((slide, index) => {
+      const normalizedSlide = normalizePptSlide(slide, index + 1)
+      if (!normalizedSlide.slideImageId) {
+        return normalizedSlide
+      }
+      const matchedImage = images.find((image) => image.id === normalizedSlide.slideImageId)
+      if (!matchedImage) {
+        return normalizedSlide
+      }
+      return {
+        ...normalizedSlide,
+        slideImageUrl: normalizedSlide.slideImageUrl || imageDownloadUrl(matchedImage) || matchedImage.image_url || matchedImage.remoteUrl || undefined
+      }
+    })
+  }
+}
+
 function currentPptWorkspaceState(): PptWorkspaceState {
-  const normalizedPlan = pptPlan.value ? normalizePptPlan(pptPlan.value) : null
+  const normalizedPlan = hydratePptPlanSlideImages(pptPlan.value ? normalizePptPlan(pptPlan.value) : null)
   return {
     prompt: pptPrompt.value,
     style: pptStyle.value,
@@ -1275,7 +1302,7 @@ function currentPptWorkspaceState(): PptWorkspaceState {
 }
 
 function applyPptWorkspaceState(state?: Partial<PptWorkspaceState> | null): void {
-  const normalizedPlan = state?.plan ? normalizePptPlan(state.plan) : null
+  const normalizedPlan = hydratePptPlanSlideImages(state?.plan ? normalizePptPlan(state.plan) : null)
   pptPrompt.value = typeof state?.prompt === 'string' ? state.prompt : ''
   pptStyle.value = typeof state?.style === 'string' ? state.style : ''
   pptDesignDetails.value = typeof state?.designDetails === 'string' ? state.designDetails : ''
