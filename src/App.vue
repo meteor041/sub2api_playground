@@ -217,6 +217,7 @@ const pptFormGenerationPrompt = ref('')
 const pptSidebarTab = ref<'settings' | 'tasks'>('settings')
 const pptConfigPanelOpen = ref(false)
 const pptEditorOpen = ref(false)
+const pptEditorToolsOpen = ref(false)
 const pptPresentOpen = ref(false)
 const pptImageGenerationConcurrency = 5
 
@@ -1446,11 +1447,13 @@ function removePptKeyPoint(index: number): void {
 function openPptSlideEditor(index: number): void {
   selectPptSlide(index)
   syncPptSlideForm(pptSlides.value[index] || null)
+  pptEditorToolsOpen.value = false
   pptEditorOpen.value = true
 }
 
 function closePptSlideEditor(): void {
   clearPptAutoSaveTimer()
+  pptEditorToolsOpen.value = false
   pptEditorOpen.value = false
 }
 
@@ -4720,6 +4723,9 @@ onBeforeUnmount(() => {
               返回概览
             </button>
             <div class="ppt-editor-topbar-actions">
+              <button class="ghost mini" type="button" @click="pptEditorToolsOpen = !pptEditorToolsOpen">
+                {{ pptEditorToolsOpen ? '收起工具' : 'AI 工具' }}
+              </button>
               <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
                 重写
               </button>
@@ -4845,7 +4851,7 @@ onBeforeUnmount(() => {
                 </article>
               </div>
             </article>
-            <aside class="ppt-focus-editor">
+            <aside class="ppt-focus-editor" :class="{ open: pptEditorToolsOpen }">
               <section class="ppt-slide-form-card">
                 <div class="ppt-slide-form-header">
                   <span class="ppt-slide-label">AI 工具</span>
