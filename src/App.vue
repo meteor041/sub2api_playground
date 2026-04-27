@@ -379,13 +379,12 @@ function previewUrlForPptSlide(slide: PptSlidePlan): string {
   return image ? imagePreviewUrl(image, modalPreviewWidth) : ''
 }
 
-const pptHeroTitleLines = computed(() => {
-  const title = (pptPlan.value?.projectTitle || pptPrompt.value || 'AI图像生成SaaS').trim().replace(/\s+/g, ' ')
-  return [
-    title.slice(0, 40) || 'AI图像生成SaaS',
-    '路演大纲'
-  ]
-})
+const pptHeroTitle = computed(() => (
+  (pptPlan.value?.projectTitle || pptPrompt.value || 'AI图像生成SaaS')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .slice(0, 40) || 'AI图像生成SaaS'
+))
 
 const activePendingTaskIds = new Set<string>()
 
@@ -4367,10 +4366,7 @@ onBeforeUnmount(() => {
           <header class="ppt-hero">
             <div class="ppt-hero-copy">
               <p class="eyebrow">Pitch Deck Studio</p>
-              <h1>
-                <span>{{ pptHeroTitleLines[0] }}</span>
-                <span>{{ pptHeroTitleLines[1] }}</span>
-              </h1>
+              <h1>{{ pptHeroTitle }}</h1>
             </div>
             <div class="ppt-hero-actions">
               <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptPlan">
