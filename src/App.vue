@@ -3315,7 +3315,7 @@ async function refreshBalanceOnly(): Promise<void> {
   }
 }
 
-async function handleGeneratePptPlan(): Promise<void> {
+async function handleGeneratePptPlan(options: { skipSuccessToast?: boolean } = {}): Promise<boolean> {
   if (!currentConversationId.value) {
     await startNewConversation()
   }
@@ -3329,11 +3329,11 @@ async function handleGeneratePptPlan(): Promise<void> {
 
   if (!apiKey) {
     setError('请先选择或创建一个 OpenAI 分组 API Key。')
-    return
+    return false
   }
   if (!prompt) {
     setError('请输入 PPT 内容或大纲提示词。')
-    return
+    return false
   }
 
   pptBusy.value = true
@@ -3381,8 +3381,10 @@ async function handleGeneratePptPlan(): Promise<void> {
       if (originConversationId) {
         await saveConversationSnapshot(originConversationId, chatMessages.value, generatedImages.value)
       }
-      setSuccess('Mock 模式下已生成本地 PPT 分页方案。')
-      return
+      if (!options.skipSuccessToast) {
+        setSuccess('Mock 模式下已生成本地 PPT 分页方案。')
+      }
+      return true
     }
 
     const response = await sendResponsesRequest(apiKey, {
@@ -3424,13 +3426,25 @@ async function handleGeneratePptPlan(): Promise<void> {
     if (originConversationId) {
       await saveConversationSnapshot(originConversationId, chatMessages.value, generatedImages.value)
     }
-    setSuccess('PPT 分页方案已生成。')
+    if (!options.skipSuccessToast) {
+      setSuccess('PPT 分页方案已生成。')
+    }
     await refreshBalanceOnly()
+    return true
   } catch (error) {
     setError(error instanceof Error ? error.message : 'PPT 分页生成失败')
+    return false
   } finally {
     pptBusy.value = false
   }
+}
+
+async function handleGeneratePptProject(): Promise<void> {
+  const generatedPlan = await handleGeneratePptPlan({ skipSuccessToast: true })
+  if (!generatedPlan || !pptPlan.value || pptPlan.value.slides.length === 0) {
+    return
+  }
+  await handleGenerateAllPptSlideImages()
 }
 
 async function requestSinglePptSlide(operation: 'rewrite' | 'insert'): Promise<PptSlidePlan> {
@@ -4610,7 +4624,7 @@ onBeforeUnmount(() => {
               <h1>{{ pptHeroTitle }}</h1>
             </div>
             <div class="ppt-hero-actions">
-              <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptPlan">
+              <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptProject">
                 <span>✨</span>
                 {{ pptBusy ? '生成中...' : '生成' }}
               </button>
@@ -4693,7 +4707,7 @@ onBeforeUnmount(() => {
                   placeholder="例如：为 AI 图像生成 SaaS 做一套融资路演大纲，包含市场、产品、增长和商业模式。"
                 />
                 <div class="ppt-empty-actions">
-                  <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptPlan">
+                  <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptProject">
                     <span>✨</span>
                     {{ pptBusy ? '生成中...' : '生成' }}
                   </button>
