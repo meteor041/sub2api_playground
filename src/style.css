@@ -1360,6 +1360,12 @@ h2 {
   border-color: rgba(226, 232, 240, 0.08);
 }
 
+:root[data-theme="dark"] .ppt-task-record {
+  color: var(--ink);
+  background: rgba(15, 23, 42, 0.52);
+  outline-color: rgba(226, 232, 240, 0.08);
+}
+
 .ppt-slide-points ul {
   margin: 0;
   padding-left: 1.1rem;
@@ -1512,6 +1518,10 @@ h2 {
 }
 
 .ppt-task-record {
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.62);
+  box-shadow: none;
+  outline: 1px solid rgba(17, 24, 39, 0.08);
   text-align: left;
   transition: transform 200ms ease, border-color 200ms ease, background 200ms ease;
 }
@@ -1531,6 +1541,7 @@ h2 {
 }
 
 .ppt-task-record.active {
+  color: var(--ink);
   border-color: rgba(255, 79, 46, 0.18);
   background: rgba(255, 79, 46, 0.08);
 }
