@@ -1404,6 +1404,44 @@ function syncPptSlideForm(slide: PptSlidePlan | null): void {
   pptFormGenerationPrompt.value = slide?.generationPrompt || ''
 }
 
+function editablePptKeyPoints(): string[] {
+  const items = pptFormKeyPoints.value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+  return items.length > 0 ? items : ['']
+}
+
+function setPptKeyPoints(items: string[]): void {
+  pptFormKeyPoints.value = items
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .join('\n')
+}
+
+function updatePptKeyPoint(index: number, value: string): void {
+  const items = editablePptKeyPoints()
+  items[index] = value
+  setPptKeyPoints(items)
+  schedulePptSlideAutoSave()
+}
+
+function handlePptKeyPointInput(index: number, event: Event): void {
+  const target = event.target as HTMLTextAreaElement | null
+  updatePptKeyPoint(index, target?.value || '')
+}
+
+function addPptKeyPoint(): void {
+  setPptKeyPoints([...editablePptKeyPoints(), ''])
+}
+
+function removePptKeyPoint(index: number): void {
+  const items = editablePptKeyPoints()
+  items.splice(index, 1)
+  setPptKeyPoints(items)
+  schedulePptSlideAutoSave()
+}
+
 function openPptSlideEditor(index: number): void {
   selectPptSlide(index)
   syncPptSlideForm(pptSlides.value[index] || null)
@@ -1411,6 +1449,7 @@ function openPptSlideEditor(index: number): void {
 }
 
 function closePptSlideEditor(): void {
+  clearPptAutoSaveTimer()
   pptEditorOpen.value = false
 }
 
@@ -1423,6 +1462,38 @@ function openPptPresentation(): void {
 
 function closePptPresentation(): void {
   pptPresentOpen.value = false
+}
+
+function clearPptAutoSaveTimer(): void {
+  if (pptAutoSaveTimer != null) {
+    window.clearTimeout(pptAutoSaveTimer)
+    pptAutoSaveTimer = null
+  }
+}
+
+function canPersistCurrentPptSlideDraft(): boolean {
+  return Boolean(
+    pptPlan.value &&
+    currentPptSlide.value &&
+    pptFormTitle.value.trim() &&
+    pptFormObjective.value.trim() &&
+    pptFormLayout.value.trim() &&
+    pptFormVisualDirection.value.trim() &&
+    pptFormSpeakerNotes.value.trim() &&
+    pptFormGenerationPrompt.value.trim() &&
+    editablePptKeyPoints().some((item) => item.trim())
+  )
+}
+
+function schedulePptSlideAutoSave(): void {
+  clearPptAutoSaveTimer()
+  if (!pptEditorOpen.value || pptBusy.value || !canPersistCurrentPptSlideDraft()) {
+    return
+  }
+  pptAutoSaveTimer = window.setTimeout(() => {
+    pptAutoSaveTimer = null
+    void handleSaveCurrentPptSlide({ silent: true })
+  }, 700)
 }
 
 async function copyText(value: string, successText: string): Promise<void> {
@@ -3547,9 +3618,11 @@ async function handleDuplicatePptSlideAt(index: number): Promise<void> {
   setSuccess('当前页已复制。')
 }
 
-async function handleSaveCurrentPptSlide(): Promise<void> {
+async function handleSaveCurrentPptSlide(options: { silent?: boolean } = {}): Promise<void> {
   if (!pptPlan.value || !currentPptSlide.value) {
-    setError('当前没有可保存的页面。')
+    if (!options.silent) {
+      setError('当前没有可保存的页面。')
+    }
     return
   }
 
@@ -3566,14 +3639,18 @@ async function handleSaveCurrentPptSlide(): Promise<void> {
     .slice(0, 6)
 
   if (!title || !objective || keyPoints.length === 0 || !layout || !visualDirection || !speakerNotes || !generationPrompt) {
-    setError('请先补全当前页的标题、目标、要点、版式、视觉方向、讲述建议和制作 Prompt。')
+    if (!options.silent) {
+      setError('请先补全当前页的标题、目标、要点、版式、视觉方向、讲述建议和制作 Prompt。')
+    }
     return
   }
 
   const slides = [...pptPlan.value.slides]
   const current = slides[pptCurrentSlideIndex.value]
   if (!current) {
-    setError('当前页已丢失，请刷新后重试。')
+    if (!options.silent) {
+      setError('当前页已丢失，请刷新后重试。')
+    }
     return
   }
 
@@ -3593,7 +3670,9 @@ async function handleSaveCurrentPptSlide(): Promise<void> {
     slides: normalizePptSlides(slides)
   }
   await persistPptConversationState()
-  setSuccess('当前页内容已保存。')
+  if (!options.silent) {
+    setSuccess('当前页内容已保存。')
+  }
 }
 
 async function generatePptSlideImageAtIndex(slideIndex: number): Promise<GeneratedImage> {
@@ -4097,6 +4176,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   clearToastTimer()
+  clearPptAutoSaveTimer()
   if (librarySearchTimer) {
     window.clearTimeout(librarySearchTimer)
   }
@@ -4659,14 +4739,50 @@ onBeforeUnmount(() => {
                   <div class="ppt-focus-slide-shell">
                     <header class="ppt-focus-slide-header">
                       <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
-                      <strong>{{ currentPptSlide.title }}</strong>
-                      <p>{{ currentPptSlide.objective }}</p>
+                      <input
+                        v-model="pptFormTitle"
+                        class="ppt-canvas-title"
+                        type="text"
+                        placeholder="输入这一页的标题"
+                        @input="schedulePptSlideAutoSave"
+                      />
+                      <textarea
+                        v-model="pptFormObjective"
+                        class="ppt-canvas-objective"
+                        rows="2"
+                        placeholder="这一页要讲清什么"
+                        @input="schedulePptSlideAutoSave"
+                      />
                     </header>
                     <div class="ppt-focus-slide-body">
                       <section class="ppt-focus-slide-points">
-                        <span class="ppt-slide-label">核心内容</span>
+                        <div class="ppt-focus-block-head">
+                          <span class="ppt-slide-label">核心内容</span>
+                          <button class="ghost mini" type="button" @click="addPptKeyPoint">
+                            添加要点
+                          </button>
+                        </div>
                         <ul>
-                          <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                          <li v-for="(point, pointIndex) in editablePptKeyPoints()" :key="`${currentPptSlide.pageNumber}-${pointIndex}`" class="ppt-canvas-point-item">
+                            <textarea
+                              :value="point"
+                              rows="2"
+                              class="ppt-canvas-point-input"
+                              placeholder="输入要点"
+                              @input="handlePptKeyPointInput(pointIndex, $event)"
+                            />
+                            <button
+                              v-if="editablePptKeyPoints().length > 1"
+                              class="ghost mini icon-button"
+                              type="button"
+                              aria-label="删除要点"
+                              @click="removePptKeyPoint(pointIndex)"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M6 6 18 18M18 6 6 18" />
+                              </svg>
+                            </button>
+                          </li>
                         </ul>
                       </section>
                       <aside class="ppt-focus-slide-aside">
@@ -4685,15 +4801,37 @@ onBeforeUnmount(() => {
                         <section class="ppt-focus-slide-meta">
                           <div>
                             <span class="ppt-slide-label">版式</span>
-                            <p>{{ currentPptSlide.layout }}</p>
+                            <textarea
+                              v-model="pptFormLayout"
+                              rows="4"
+                              class="ppt-canvas-meta-input"
+                              placeholder="描述版式与信息布局"
+                              @input="schedulePptSlideAutoSave"
+                            />
                           </div>
                           <div>
                             <span class="ppt-slide-label">视觉方向</span>
-                            <p>{{ currentPptSlide.visualDirection }}</p>
+                            <textarea
+                              v-model="pptFormVisualDirection"
+                              rows="4"
+                              class="ppt-canvas-meta-input"
+                              placeholder="描述色彩、质感、图形方向"
+                              @input="schedulePptSlideAutoSave"
+                            />
                           </div>
                         </section>
                       </aside>
                     </div>
+                    <footer class="ppt-focus-slide-foot">
+                      <span class="ppt-slide-label">讲述备注</span>
+                      <textarea
+                        v-model="pptFormSpeakerNotes"
+                        rows="2"
+                        class="ppt-canvas-notes"
+                        placeholder="演示时怎么讲这一页"
+                        @input="schedulePptSlideAutoSave"
+                      />
+                    </footer>
                   </div>
                 </article>
               </div>
@@ -4701,39 +4839,19 @@ onBeforeUnmount(() => {
             <aside class="ppt-focus-editor">
               <section class="ppt-slide-form-card">
                 <div class="ppt-slide-form-header">
-                  <span class="ppt-slide-label">当前页编辑</span>
+                  <span class="ppt-slide-label">AI 工具</span>
                   <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleSaveCurrentPptSlide">
                     保存
                   </button>
                 </div>
-                <label class="ppt-slide-field">
-                  <span>标题</span>
-                  <input v-model="pptFormTitle" type="text" placeholder="当前页标题" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>页面目标</span>
-                  <textarea v-model="pptFormObjective" rows="3" placeholder="这页要讲清什么" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>核心要点</span>
-                  <textarea v-model="pptFormKeyPoints" rows="5" placeholder="每行一个要点" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>版式</span>
-                  <textarea v-model="pptFormLayout" rows="3" placeholder="推荐版式与信息布局" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>视觉方向</span>
-                  <textarea v-model="pptFormVisualDirection" rows="3" placeholder="色彩、质感、图形风格" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>讲述建议</span>
-                  <textarea v-model="pptFormSpeakerNotes" rows="3" placeholder="演示时怎么讲" />
-                </label>
-                <label class="ppt-slide-field">
-                  <span>制作 Prompt</span>
-                  <textarea v-model="pptFormGenerationPrompt" rows="6" placeholder="该页的详细制作提示词" />
-                </label>
+                <div class="ppt-ai-tool-actions">
+                  <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
+                    重写当前页
+                  </button>
+                  <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                    生成配图
+                  </button>
+                </div>
               </section>
               <section class="ppt-slide-image-panel">
                 <span class="ppt-slide-label">本页配图</span>
@@ -4751,11 +4869,20 @@ onBeforeUnmount(() => {
                 </div>
               </section>
               <section class="ppt-slide-prompt">
-                <span class="ppt-slide-label">当前页编辑指令</span>
+                <span class="ppt-slide-label">给 AI 的指令</span>
                 <textarea
                   v-model="pptSlideEditPrompt"
                   rows="5"
                   placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+                />
+              </section>
+              <section class="ppt-slide-prompt">
+                <span class="ppt-slide-label">当前页制作 Prompt</span>
+                <textarea
+                  v-model="pptFormGenerationPrompt"
+                  rows="8"
+                  placeholder="该页的详细制作提示词"
+                  @input="schedulePptSlideAutoSave"
                 />
               </section>
             </aside>

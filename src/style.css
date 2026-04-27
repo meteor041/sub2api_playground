@@ -1068,7 +1068,8 @@ h2 {
   align-content: start;
 }
 
-.ppt-focus-slide-header strong {
+.ppt-focus-slide-header strong,
+.ppt-canvas-title {
   font-size: clamp(1.9rem, 2.8vw, 3.6rem);
   line-height: 1.04;
   letter-spacing: -0.06em;
@@ -1079,6 +1080,48 @@ h2 {
   color: var(--muted);
   line-height: 1.6;
   white-space: pre-wrap;
+}
+
+.ppt-canvas-title,
+.ppt-canvas-objective,
+.ppt-canvas-point-input,
+.ppt-canvas-meta-input,
+.ppt-canvas-notes {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+  resize: none;
+}
+
+.ppt-canvas-title::placeholder,
+.ppt-canvas-objective::placeholder,
+.ppt-canvas-point-input::placeholder,
+.ppt-canvas-meta-input::placeholder,
+.ppt-canvas-notes::placeholder {
+  color: color-mix(in srgb, var(--muted) 78%, transparent);
+}
+
+.ppt-canvas-title:focus,
+.ppt-canvas-objective:focus,
+.ppt-canvas-point-input:focus,
+.ppt-canvas-meta-input:focus,
+.ppt-canvas-notes:focus {
+  outline: none;
+}
+
+.ppt-canvas-title {
+  font-weight: 800;
+}
+
+.ppt-canvas-objective,
+.ppt-canvas-meta-input,
+.ppt-canvas-notes {
+  min-height: 0;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .ppt-focus-slide-body {
@@ -1102,11 +1145,36 @@ h2 {
   border: 1px solid rgba(17, 24, 39, 0.06);
 }
 
+.ppt-focus-block-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .ppt-focus-slide-points ul {
   margin: 0;
-  padding-left: 1.15rem;
-  color: var(--ink);
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 12px;
+}
+
+.ppt-canvas-point-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.ppt-canvas-point-input {
+  min-height: 0;
+  padding: 0.1rem 0;
   line-height: 1.7;
+}
+
+.ppt-canvas-point-item .icon-button {
+  margin-top: 2px;
 }
 
 .ppt-focus-slide-aside {
@@ -1149,6 +1217,13 @@ h2 {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.62);
   border: 1px solid rgba(17, 24, 39, 0.06);
+}
+
+.ppt-focus-slide-foot {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .ppt-present-modal {
@@ -1232,6 +1307,10 @@ h2 {
   border-color: rgba(226, 232, 240, 0.08);
 }
 
+:root[data-theme="dark"] .ppt-focus-slide-foot {
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
 .ppt-slide-points ul {
   margin: 0;
   padding-left: 1.1rem;
@@ -1250,6 +1329,12 @@ h2 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.ppt-ai-tool-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
 }
 
 .ppt-slide-field span {
@@ -3133,6 +3218,10 @@ h2 {
 
   .ppt-focus-slide-body,
   .ppt-focus-slide-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .ppt-ai-tool-actions {
     grid-template-columns: 1fr;
   }
 
