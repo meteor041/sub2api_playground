@@ -192,3 +192,23 @@ export interface ConversationPayload {
     generatedImages: GeneratedImage[]
   }
 }
+
+export interface PptSlidePlan {
+  pageNumber: number
+  title: string
+  objective: string
+  keyPoints: string[]
+  layout: string
+  visualDirection: string
+  speakerNotes: string
+  generationPrompt: string
+}
+
+export interface PptPlanResult {
+  projectTitle: string
+  summary: string
+  targetAudience: string
+  narrativeFlow: string
+  visualSystem: string
+  slides: PptSlidePlan[]
+}

@@ -34,6 +34,8 @@ import type {
   ImageTaskStatus,
   LibraryFacet,
   LibraryItem,
+  PptPlanResult,
+  PptSlidePlan,
   UserProfile
 } from './types'
 
@@ -67,6 +69,7 @@ const maxImageToolCallsPerTurn = 1
 const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
 const THEME_MODE_KEY = 'playground_theme_mode'
+const PPT_DRAFT_KEY = 'playground_ppt_draft'
 const galleryPreviewWidth = 480
 const conversationPreviewWidth = 960
 const modalPreviewWidth = 1280
@@ -121,7 +124,7 @@ const imageToolInstructions = [
 ].join(' ')
 
 const isAuthenticated = ref(hasAuthToken())
-const activeView = ref<'gallery' | 'library' | 'create'>('gallery')
+const activeView = ref<'gallery' | 'library' | 'create' | 'ppt'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
 const themeMode = ref<'light' | 'dark'>('light')
 const toastAutoCloseMs = 5000
@@ -187,6 +190,14 @@ const chatBusy = ref(false)
 const chatMessages = ref<ChatMessage[]>([])
 const composerImages = ref<ChatImageAttachment[]>([])
 const composerFileInput = ref<HTMLInputElement | null>(null)
+const pptPrompt = ref('')
+const pptStyle = ref('')
+const pptDesignDetails = ref('')
+const pptPageCount = ref(8)
+const pptBusy = ref(false)
+const pptSelectedModel = ref(textModels[0])
+const pptPlan = ref<PptPlanResult | null>(null)
+const pptCurrentSlideIndex = ref(0)
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -316,6 +327,17 @@ const currentConversation = computed(() => (
   conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
 
+const pptSlides = computed(() => pptPlan.value?.slides || [])
+
+const currentPptSlide = computed(() => {
+  const slides = pptSlides.value
+  if (slides.length === 0) {
+    return null
+  }
+  const index = Math.min(Math.max(pptCurrentSlideIndex.value, 0), slides.length - 1)
+  return slides[index] || null
+})
+
 const activePendingTaskIds = new Set<string>()
 
 interface ResponseFunctionCall {
@@ -387,6 +409,15 @@ interface StandalonePreviewImage {
   description?: string
   mimeType?: string
   eyebrow?: string
+}
+
+interface PptDraftSnapshot {
+  prompt: string
+  style: string
+  designDetails: string
+  pageCount: number
+  model: string
+  plan: PptPlanResult | null
 }
 
 function uid(prefix: string): string {
@@ -1035,6 +1066,21 @@ function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n/g, '\n')
 }
 
+function extractJsonBlock(value: string): string {
+  const trimmed = value.trim()
+  const fencedMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i)
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim()
+  }
+
+  const start = trimmed.indexOf('{')
+  const end = trimmed.lastIndexOf('}')
+  if (start >= 0 && end > start) {
+    return trimmed.slice(start, end + 1)
+  }
+  return trimmed
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms))
 }
@@ -1085,6 +1131,149 @@ function clearToastTimer(): void {
   if (toastTimer != null) {
     window.clearTimeout(toastTimer)
     toastTimer = null
+  }
+}
+
+function normalizePptSlide(slide: Partial<PptSlidePlan>, fallbackPageNumber: number): PptSlidePlan {
+  const keyPoints = Array.isArray(slide.keyPoints)
+    ? slide.keyPoints.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6)
+    : []
+
+  return {
+    pageNumber: Number.isFinite(Number(slide.pageNumber)) ? Number(slide.pageNumber) : fallbackPageNumber,
+    title: String(slide.title || `第 ${fallbackPageNumber} 页`).trim(),
+    objective: String(slide.objective || '').trim(),
+    keyPoints,
+    layout: String(slide.layout || '').trim(),
+    visualDirection: String(slide.visualDirection || '').trim(),
+    speakerNotes: String(slide.speakerNotes || '').trim(),
+    generationPrompt: String(slide.generationPrompt || '').trim()
+  }
+}
+
+function normalizePptPlan(plan: Partial<PptPlanResult>): PptPlanResult {
+  const slides = Array.isArray(plan.slides)
+    ? plan.slides.map((slide, index) => normalizePptSlide(slide, index + 1))
+    : []
+
+  return {
+    projectTitle: String(plan.projectTitle || '未命名 PPT').trim(),
+    summary: String(plan.summary || '').trim(),
+    targetAudience: String(plan.targetAudience || '').trim(),
+    narrativeFlow: String(plan.narrativeFlow || '').trim(),
+    visualSystem: String(plan.visualSystem || '').trim(),
+    slides
+  }
+}
+
+function buildMockPptPlan(prompt: string, style: string, details: string, pageCount: number): PptPlanResult {
+  const visualSystem = style || '现代商务风，信息层级清晰，深浅对比明确'
+  const summary = details || '每页只讲一个重点，标题直接，适合口头演示'
+  const titles = [
+    '封面与主题定位',
+    '问题背景与行业痛点',
+    '核心方案概览',
+    '产品能力拆解',
+    '关键场景演示',
+    '竞争优势与差异化',
+    '商业模式与增长路径',
+    '实施计划与资源需求',
+    '阶段成果与风险控制',
+    '总结与行动号召'
+  ]
+
+  return {
+    projectTitle: `${prompt.slice(0, 18) || '演示文稿'}方案`,
+    summary,
+    targetAudience: '决策者、客户或内部评审团队',
+    narrativeFlow: '先讲背景和问题，再讲解决方案与能力，最后落到价值、执行和结论。',
+    visualSystem,
+    slides: Array.from({ length: pageCount }, (_, index) => ({
+      pageNumber: index + 1,
+      title: titles[index] || `第 ${index + 1} 页内容`,
+      objective: `围绕“${prompt.slice(0, 24) || '当前主题'}”推进第 ${index + 1} 个关键信息点。`,
+      keyPoints: [
+        '突出一个核心结论',
+        '用 3 到 4 个信息块承载主要内容',
+        '标题、数据和视觉焦点明确区分'
+      ],
+      layout: index === 0
+        ? '大标题 + 副标题 + 视觉主图的封面布局'
+        : '左侧标题与要点，右侧图表/示意图/数据卡片的双栏布局',
+      visualDirection: visualSystem,
+      speakerNotes: `这一页重点解释${titles[index] || `第 ${index + 1} 页`}，控制在 30 到 60 秒内讲清楚。`,
+      generationPrompt: [
+        `制作 PPT 第 ${index + 1} 页：${titles[index] || `第 ${index + 1} 页内容`}`,
+        `目标：${prompt}`,
+        `页面目的：突出这一页的单一重点，并与整套风格保持一致。`,
+        `版式：${index === 0 ? '封面式排版' : '双栏信息排版'}。`,
+        `风格：${visualSystem}。`,
+        `细节要求：${summary}。`,
+        '请给出适合正式演示的标题层级、配色、图表或插画建议，并保证可直接落地制作。'
+      ].join(' ')
+    }))
+  }
+}
+
+function persistPptDraft(): void {
+  const snapshot: PptDraftSnapshot = {
+    prompt: pptPrompt.value,
+    style: pptStyle.value,
+    designDetails: pptDesignDetails.value,
+    pageCount: pptPageCount.value,
+    model: pptSelectedModel.value,
+    plan: pptPlan.value
+  }
+  localStorage.setItem(PPT_DRAFT_KEY, JSON.stringify(snapshot))
+}
+
+function restorePptDraft(): void {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PPT_DRAFT_KEY) || 'null') as PptDraftSnapshot | null
+    if (!parsed || typeof parsed !== 'object') {
+      return
+    }
+    pptPrompt.value = typeof parsed.prompt === 'string' ? parsed.prompt : ''
+    pptStyle.value = typeof parsed.style === 'string' ? parsed.style : ''
+    pptDesignDetails.value = typeof parsed.designDetails === 'string' ? parsed.designDetails : ''
+    pptPageCount.value = Number.isFinite(Number(parsed.pageCount))
+      ? Math.min(Math.max(Number(parsed.pageCount), 1), 30)
+      : 8
+    pptSelectedModel.value = typeof parsed.model === 'string' && textModels.includes(parsed.model)
+      ? parsed.model
+      : textModels[0]
+    pptPlan.value = parsed.plan ? normalizePptPlan(parsed.plan) : null
+    pptCurrentSlideIndex.value = 0
+  } catch {
+    // Ignore malformed local state.
+  }
+}
+
+function navigatePptSlide(direction: -1 | 1): void {
+  if (pptSlides.value.length < 2) {
+    return
+  }
+  pptCurrentSlideIndex.value = (pptCurrentSlideIndex.value + direction + pptSlides.value.length) % pptSlides.value.length
+}
+
+function selectPptSlide(index: number): void {
+  if (index < 0 || index >= pptSlides.value.length) {
+    return
+  }
+  pptCurrentSlideIndex.value = index
+}
+
+async function copyText(value: string, successText: string): Promise<void> {
+  if (!value.trim()) {
+    setError('当前没有可复制的内容。')
+    return
+  }
+
+  try {
+    await navigator.clipboard.writeText(value)
+    setSuccess(successText)
+  } catch {
+    setError('复制失败，请检查浏览器权限。')
   }
 }
 
@@ -2761,7 +2950,116 @@ async function refreshBalanceOnly(): Promise<void> {
   }
 }
 
+async function handleGeneratePptPlan(): Promise<void> {
+  const apiKey = selectedKeySecret.value
+  const prompt = pptPrompt.value.trim()
+  const style = pptStyle.value.trim()
+  const details = pptDesignDetails.value.trim()
+  const pageCount = Math.min(Math.max(Number(pptPageCount.value) || 0, 1), 30)
+
+  if (!apiKey) {
+    setError('请先选择或创建一个 OpenAI 分组 API Key。')
+    return
+  }
+  if (!prompt) {
+    setError('请输入 PPT 内容或大纲提示词。')
+    return
+  }
+
+  pptBusy.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+
+  const instructions = [
+    '你是一名资深演示设计总监和信息架构师。',
+    '请根据用户输入，先统一整套 PPT 的叙事、风格、信息密度和视觉系统，再拆分分页。',
+    '输出必须是严格 JSON，不要输出 Markdown、解释、前后缀。',
+    'slides 必须与 pageCount 完全一致。',
+    '每一页都要给出具体、可执行的 generationPrompt，说明这一页该如何制作，且所有页保持统一风格。',
+    'generationPrompt 必须包含：页面目标、推荐版式、内容结构、视觉风格、配色/字体/图表或插画建议。',
+    'keyPoints 控制在 3 到 6 条，每条一句短语。',
+    'speakerNotes 用中文，帮助用户理解该页讲什么。',
+    '如果用户信息不足，请做合理补全，但不要偏离主题。',
+    '全部字段使用中文，projectTitle 简洁明确。'
+  ].join(' ')
+
+  const schemaExample = {
+    projectTitle: 'string',
+    summary: 'string',
+    targetAudience: 'string',
+    narrativeFlow: 'string',
+    visualSystem: 'string',
+    slides: [{
+      pageNumber: 1,
+      title: 'string',
+      objective: 'string',
+      keyPoints: ['string'],
+      layout: 'string',
+      visualDirection: 'string',
+      speakerNotes: 'string',
+      generationPrompt: 'string'
+    }]
+  }
+
+  try {
+    if (ENABLE_MOCK) {
+      pptPlan.value = buildMockPptPlan(prompt, style, details, pageCount)
+      pptCurrentSlideIndex.value = 0
+      persistPptDraft()
+      setSuccess('Mock 模式下已生成本地 PPT 分页方案。')
+      return
+    }
+
+    const response = await sendResponsesRequest(apiKey, {
+      model: pptSelectedModel.value,
+      instructions,
+      input: [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: [
+                `pageCount: ${pageCount}`,
+                `contentOrOutline: ${prompt}`,
+                `style: ${style || '未指定，请根据内容推断一个专业且统一的风格'}`,
+                `designDetails: ${details || '信息层级清晰，重点突出，适合正式演示'}`,
+                `请仅返回 JSON，字段结构参考：${JSON.stringify(schemaExample)}`
+              ].join('\n')
+            }
+          ]
+        }
+      ]
+    })
+    ensureResponseSucceeded(response)
+    const rawText = extractResponseText(response)
+    const jsonText = extractJsonBlock(rawText)
+    const parsed = JSON.parse(jsonText) as Partial<PptPlanResult>
+    const normalized = normalizePptPlan(parsed)
+
+    if (normalized.slides.length !== pageCount) {
+      throw new Error(`模型返回了 ${normalized.slides.length} 页，和设定的 ${pageCount} 页不一致。`)
+    }
+
+    pptPlan.value = normalized
+    pptCurrentSlideIndex.value = 0
+    persistPptDraft()
+    setSuccess('PPT 分页方案已生成。')
+    await refreshBalanceOnly()
+  } catch (error) {
+    setError(error instanceof Error ? error.message : 'PPT 分页生成失败')
+  } finally {
+    pptBusy.value = false
+  }
+}
+
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
+watch(() => pptSlides.value.length, () => {
+  pptCurrentSlideIndex.value = 0
+})
+watch([pptPrompt, pptStyle, pptDesignDetails, pptPageCount, pptSelectedModel, pptPlan], () => {
+  persistPptDraft()
+}, { deep: true })
 
 watch(activeView, async (view) => {
   if (view !== 'gallery') {
@@ -2823,6 +3121,7 @@ onMounted(async () => {
   initializeThemeMode()
   applyBranding()
   syncViewportLayout()
+  restorePptDraft()
   window.addEventListener('resize', syncViewportLayout)
 
   if (ENABLE_MOCK) {
@@ -2928,6 +3227,16 @@ onBeforeUnmount(() => {
           <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
             <span>创造</span>
             <small>Chat & create</small>
+          </div>
+        </button>
+        <button :class="{ active: activeView === 'ppt' }" type="button" title="PPT" @click="activeView = 'ppt'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="4" y="3" width="16" height="18" rx="2"/>
+            <path d="M8 8h8M8 12h8M8 16h5"/>
+          </svg>
+          <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
+            <span>PPT</span>
+            <small>Slide planner</small>
           </div>
         </button>
       </nav>
@@ -3230,6 +3539,219 @@ onBeforeUnmount(() => {
           <span v-else-if="!libraryHasMore && libraryItems.length > 0">已经到底了</span>
         </div>
       </template>
+    </section>
+
+    <section v-else-if="activeView === 'ppt'" class="page ppt-page">
+      <template v-if="!isAuthenticated">
+        <section class="login-card panel">
+          <div>
+            <p class="eyebrow">PPT</p>
+            <h1>登录后开始规划 PPT</h1>
+            <p>选择模型和 API Key，输入内容、风格和设计要求，系统会拆解出统一风格的逐页制作方案。</p>
+          </div>
+          <form class="login-form" @submit.prevent="handleLogin">
+            <label>
+              邮箱
+              <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              密码
+              <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+            </label>
+            <button :disabled="loginBusy" type="submit">
+              {{ loginBusy ? '登录中...' : '进入 PPT 页面' }}
+            </button>
+          </form>
+        </section>
+      </template>
+
+      <div v-else class="ppt-layout">
+        <section class="ppt-stage panel">
+          <div class="ppt-stage-toolbar">
+            <div>
+              <p class="eyebrow">PPT Preview</p>
+              <h2>{{ pptPlan?.projectTitle || '分页预览' }}</h2>
+            </div>
+            <div class="ppt-stage-actions">
+              <span class="pill">{{ pptSlides.length }} 页</span>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="!currentPptSlide"
+                @click="copyText(currentPptSlide?.generationPrompt || '', '当前页提示词已复制。')"
+              >
+                复制当前页 Prompt
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="!pptPlan"
+                @click="copyText(JSON.stringify(pptPlan, null, 2), '整套 PPT JSON 已复制。')"
+              >
+                复制整套 JSON
+              </button>
+            </div>
+          </div>
+
+          <div class="ppt-stage-main">
+            <div v-if="pptBusy" class="canvas-empty ppt-empty-state">
+              <strong>正在生成分页方案</strong>
+              <span>模型会先统一整套叙事和视觉方向，再拆分每一页的具体制作提示词。</span>
+            </div>
+            <div v-else-if="currentPptSlide" class="ppt-slide-frame">
+              <button
+                v-if="pptSlides.length > 1"
+                class="canvas-nav-btn canvas-nav-prev"
+                type="button"
+                aria-label="上一页"
+                title="上一页"
+                @click="navigatePptSlide(-1)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M15 18l-6-6 6-6"/>
+                </svg>
+              </button>
+              <article class="ppt-slide-card">
+                <header class="ppt-slide-header">
+                  <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+                  <strong>{{ currentPptSlide.title }}</strong>
+                  <p>{{ currentPptSlide.objective }}</p>
+                </header>
+                <div class="ppt-slide-grid">
+                  <section>
+                    <span class="ppt-slide-label">版式</span>
+                    <p>{{ currentPptSlide.layout }}</p>
+                  </section>
+                  <section>
+                    <span class="ppt-slide-label">视觉方向</span>
+                    <p>{{ currentPptSlide.visualDirection }}</p>
+                  </section>
+                </div>
+                <section class="ppt-slide-points">
+                  <span class="ppt-slide-label">核心内容</span>
+                  <ul>
+                    <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                  </ul>
+                </section>
+                <section class="ppt-slide-notes">
+                  <span class="ppt-slide-label">讲述建议</span>
+                  <p>{{ currentPptSlide.speakerNotes }}</p>
+                </section>
+                <section class="ppt-slide-prompt">
+                  <span class="ppt-slide-label">本页制作 Prompt</span>
+                  <p>{{ currentPptSlide.generationPrompt }}</p>
+                </section>
+              </article>
+              <button
+                v-if="pptSlides.length > 1"
+                class="canvas-nav-btn canvas-nav-next"
+                type="button"
+                aria-label="下一页"
+                title="下一页"
+                @click="navigatePptSlide(1)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M9 18l6-6-6-6"/>
+                </svg>
+              </button>
+            </div>
+            <div v-else class="canvas-empty ppt-empty-state">
+              <strong>输入需求后生成整套分页</strong>
+              <span>适合输入 PPT 主题、大纲、风格方向和细节要求，系统会生成逐页方案并保持风格统一。</span>
+            </div>
+          </div>
+
+          <div v-if="pptSlides.length > 0" class="ppt-slide-strip">
+            <button
+              v-for="(slide, index) in pptSlides"
+              :key="slide.pageNumber"
+              class="ppt-slide-thumb"
+              :class="{ active: index === pptCurrentSlideIndex }"
+              type="button"
+              @click="selectPptSlide(index)"
+            >
+              <span>0{{ index + 1 }}</span>
+              <strong>{{ slide.title }}</strong>
+            </button>
+          </div>
+        </section>
+
+        <aside class="ppt-sidebar panel">
+          <div class="ppt-sidebar-header">
+            <p class="eyebrow">Planner</p>
+            <h2>生成参数</h2>
+          </div>
+          <form class="ppt-form" @submit.prevent="handleGeneratePptPlan">
+            <label>
+              模型
+              <select v-model="pptSelectedModel">
+                <option v-for="model in textModels" :key="model" :value="model">{{ model }}</option>
+              </select>
+            </label>
+            <label>
+              API Key
+              <select v-model.number="selectedApiKeyId" :disabled="openAiApiKeys.length === 0">
+                <option v-for="key in openAiApiKeys" :key="key.id" :value="key.id">
+                  {{ key.name }} / {{ key.group?.name || 'OpenAI' }}
+                </option>
+              </select>
+            </label>
+            <label>
+              页面数量
+              <input v-model.number="pptPageCount" type="number" min="1" max="30" />
+            </label>
+            <label>
+              内容或大纲
+              <textarea
+                v-model="pptPrompt"
+                rows="7"
+                placeholder="例如：为 SaaS 产品 AI 客服解决方案做一套 10 页融资路演 PPT，包含市场痛点、方案、产品演示、商业模式、竞争壁垒和融资计划。"
+              />
+            </label>
+            <label>
+              风格
+              <textarea
+                v-model="pptStyle"
+                rows="3"
+                placeholder="例如：极简科技感、蓝灰商务风、强对比排版、大面积留白。"
+              />
+            </label>
+            <label>
+              细节设计要求
+              <textarea
+                v-model="pptDesignDetails"
+                rows="4"
+                placeholder="例如：每页只保留一个重点，图表优先，标题短促有力度，适合给投资人现场讲解。"
+              />
+            </label>
+            <button class="canvas-submit-btn" type="submit" :disabled="pptBusy || !selectedKeySecret">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 12h13M13 6l6 6-6 6" />
+              </svg>
+              {{ pptBusy ? '生成中...' : '生成分页方案' }}
+            </button>
+          </form>
+
+          <div v-if="pptPlan" class="ppt-plan-summary">
+            <section>
+              <span class="ppt-slide-label">整套摘要</span>
+              <p>{{ pptPlan.summary }}</p>
+            </section>
+            <section>
+              <span class="ppt-slide-label">受众</span>
+              <p>{{ pptPlan.targetAudience }}</p>
+            </section>
+            <section>
+              <span class="ppt-slide-label">叙事路径</span>
+              <p>{{ pptPlan.narrativeFlow }}</p>
+            </section>
+            <section>
+              <span class="ppt-slide-label">统一视觉系统</span>
+              <p>{{ pptPlan.visualSystem }}</p>
+            </section>
+          </div>
+        </aside>
+      </div>
     </section>
 
     <section v-else class="page create-page">
