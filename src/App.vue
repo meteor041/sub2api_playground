@@ -178,6 +178,7 @@ let libraryObserver: IntersectionObserver | null = null
 let toastTimer: number | null = null
 let librarySearchTimer: number | null = null
 let conversationLoadRequestId = 0
+let pptAutoSaveTimer: number | null = null
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -4848,7 +4849,7 @@ onBeforeUnmount(() => {
               <section class="ppt-slide-form-card">
                 <div class="ppt-slide-form-header">
                   <span class="ppt-slide-label">AI 工具</span>
-                  <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleSaveCurrentPptSlide">
+                  <button class="secondary mini" type="button" :disabled="pptBusy" @click="() => handleSaveCurrentPptSlide()">
                     保存
                   </button>
                 </div>
