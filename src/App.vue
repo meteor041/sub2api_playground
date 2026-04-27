@@ -208,6 +208,7 @@ const pptSlideEditPrompt = ref('')
 const pptSidebarTab = ref<'settings' | 'tasks'>('settings')
 const pptConfigPanelOpen = ref(false)
 const pptEditorOpen = ref(false)
+const pptImageGenerationConcurrency = 5
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -3572,11 +3573,23 @@ async function handleGenerateAllPptSlideImages(): Promise<void> {
   const originalIndex = pptCurrentSlideIndex.value
   pptBusy.value = true
   try {
-    for (let index = 0; index < pptPlan.value.slides.length; index += 1) {
-      pptCurrentSlideIndex.value = index
-      pptTaskLabel.value = `正在生成第 ${index + 1} / ${pptPlan.value.slides.length} 页图片...`
-      await generatePptSlideImageAtIndex(index)
+    const total = pptPlan.value.slides.length
+    const concurrency = Math.min(pptImageGenerationConcurrency, total)
+    let nextIndex = 0
+    let completed = 0
+
+    const worker = async (): Promise<void> => {
+      while (nextIndex < total) {
+        const slideIndex = nextIndex
+        nextIndex += 1
+        pptCurrentSlideIndex.value = slideIndex
+        pptTaskLabel.value = `正在生成第 ${Math.min(completed + 1, total)} / ${total} 页图片...`
+        await generatePptSlideImageAtIndex(slideIndex)
+        completed += 1
+      }
     }
+
+    await Promise.all(Array.from({ length: concurrency }, () => worker()))
     await refreshBalanceOnly()
     setSuccess('整套 PPT 图片已生成。')
   } catch (error) {
