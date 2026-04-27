@@ -773,10 +773,12 @@ h2 {
 }
 
 .ppt-deck-card-media img,
+.ppt-overview-card-media img,
 .ppt-slide-image-wrap img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   display: block;
 }
 
@@ -1213,7 +1215,8 @@ h2 {
 .ppt-focus-slide-visual img {
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
+  object-position: center;
   display: block;
 }
 
