@@ -569,11 +569,11 @@ h2 {
 
 .ppt-stage {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 18px;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 14px;
   height: 100%;
-  padding: 22px 24px 24px;
-  border-radius: 28px;
+  padding: 18px 20px 16px;
+  border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.52)),
     radial-gradient(circle at top right, rgba(255, 79, 46, 0.08), transparent 30rem);
@@ -603,10 +603,10 @@ h2 {
 
 .ppt-hero-copy h1 {
   font-family: "Aptos Display", "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
-  font-size: clamp(1.6rem, 2.4vw, 2.4rem);
-  font-weight: 650;
-  line-height: 1.02;
-  letter-spacing: -0.05em;
+  font-size: clamp(1.3rem, 2vw, 1.9rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: -0.04em;
 }
 
 .ppt-hero-actions,
@@ -704,8 +704,9 @@ h2 {
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  gap: 14px;
   overflow-y: auto;
+  align-content: start;
   padding-right: 4px;
   scrollbar-width: thin;
 }
@@ -715,13 +716,16 @@ h2 {
 .ppt-overview-card {
   display: grid;
   align-content: start;
-  gap: 14px;
-  min-height: 340px;
-  border-radius: 18px;
-  padding: 18px;
+  gap: 12px;
+  border-radius: 16px;
+  padding: 14px;
   border: 1px solid rgba(17, 24, 39, 0.08);
   background: rgba(239, 241, 245, 0.9);
-  transition: transform 200ms ease, box-shadow 200ms ease, background 200ms ease, border-color 200ms ease;
+  transition: transform 180ms ease, box-shadow 180ms ease, background 180ms ease, border-color 180ms ease;
+}
+
+.ppt-skeleton-card {
+  min-height: 280px;
 }
 
 :root[data-theme="dark"] .ppt-skeleton-card,
@@ -827,16 +831,16 @@ h2 {
 
 .ppt-overview-card-page {
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 14px;
+  left: 14px;
   z-index: 1;
-  min-width: 34px;
-  padding: 0.22rem 0.5rem;
+  min-width: 28px;
+  padding: 0.18rem 0.46rem;
   border-radius: 999px;
   color: var(--accent);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(12px);
-  font-size: 0.72rem;
+  font-size: 0.7rem;
   font-weight: 800;
   letter-spacing: 0.08em;
   text-align: center;
@@ -854,9 +858,9 @@ h2 {
 .ppt-deck-card-body strong,
 .ppt-overview-card-body strong,
 .ppt-slide-header strong {
-  font-size: clamp(1.32rem, 2vw, 2.6rem);
-  line-height: 1.06;
-  letter-spacing: -0.05em;
+  font-size: clamp(0.92rem, 1.4vw, 1.08rem);
+  line-height: 1.35;
+  letter-spacing: -0.02em;
 }
 
 .ppt-deck-card-body p,
@@ -940,13 +944,13 @@ h2 {
 
 .ppt-editor-modal {
   position: absolute;
-  inset: 14px;
+  inset: 10px;
   z-index: 14;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  gap: 14px;
-  padding: 18px;
-  border-radius: 26px;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 24px;
   overflow: hidden;
 }
 
@@ -971,10 +975,10 @@ h2 {
 
 .ppt-focus-thumb {
   display: grid;
-  gap: 6px;
+  gap: 4px;
   align-content: start;
-  padding: 10px;
-  border-radius: 14px;
+  padding: 8px 10px;
+  border-radius: 11px;
   color: var(--ink);
   background: rgba(239, 241, 245, 0.8);
   box-shadow: none;
@@ -1001,7 +1005,19 @@ h2 {
   box-shadow: 0 16px 36px rgba(255, 79, 46, 0.12);
 }
 
-.ppt-focus-canvas,
+.ppt-focus-canvas {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.08);
+  backdrop-filter: blur(18px);
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+
 .ppt-present-sheet {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -1016,7 +1032,11 @@ h2 {
 }
 
 :root[data-theme="dark"] .ppt-focus-canvas,
-:root[data-theme="dark"] .ppt-present-sheet,
+:root[data-theme="dark"] .ppt-present-sheet {
+  background: rgba(17, 24, 39, 0.88);
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
 :root[data-theme="dark"] .ppt-focus-thumb {
   background: rgba(17, 24, 39, 0.88);
   border-color: rgba(226, 232, 240, 0.08);
@@ -1032,32 +1052,29 @@ h2 {
 
 .ppt-focus-stage {
   width: 100%;
-  height: 100%;
   display: grid;
-  place-items: center;
+  place-items: start center;
+  padding: 20px 16px;
 }
 
 .ppt-focus-slide {
-  width: min(100%, 1180px);
-  aspect-ratio: 16 / 9;
-  border-radius: 28px;
-  padding: 16px;
+  width: min(100%, 1100px);
+  border-radius: 22px;
+  padding: 12px;
   background:
-    radial-gradient(circle at top left, rgba(255, 125, 78, 0.15), transparent 30%),
+    radial-gradient(circle at top left, rgba(255, 125, 78, 0.1), transparent 30%),
     linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 250, 0.92));
-  box-shadow: 0 30px 90px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 16px 54px rgba(15, 23, 42, 0.1);
 }
 
 .ppt-focus-slide-shell {
-  height: 100%;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 16px;
-  padding: 22px;
-  border-radius: 22px;
-  border: 1px solid rgba(17, 24, 39, 0.08);
-  background: rgba(255, 255, 255, 0.72);
-  backdrop-filter: blur(18px);
+  grid-template-rows: auto auto auto;
+  gap: 14px;
+  padding: 18px 20px 20px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.07);
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .ppt-focus-slide-shell.present {
@@ -1072,9 +1089,9 @@ h2 {
 
 .ppt-focus-slide-header strong,
 .ppt-canvas-title {
-  font-size: clamp(1.9rem, 2.8vw, 3.6rem);
-  line-height: 1.04;
-  letter-spacing: -0.06em;
+  font-size: clamp(1.4rem, 2vw, 2rem);
+  line-height: 1.1;
+  letter-spacing: -0.04em;
 }
 
 .ppt-focus-slide-header p,
@@ -1127,10 +1144,10 @@ h2 {
 }
 
 .ppt-focus-slide-body {
-  min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(240px, 0.68fr);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.2fr) minmax(220px, 0.6fr);
+  gap: 14px;
+  align-items: start;
 }
 
 .ppt-focus-slide-points,
@@ -1141,9 +1158,9 @@ h2 {
 }
 
 .ppt-focus-slide-points {
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.62);
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.55);
   border: 1px solid rgba(17, 24, 39, 0.06);
 }
 
@@ -1180,16 +1197,15 @@ h2 {
 }
 
 .ppt-focus-slide-aside {
-  min-height: 0;
   display: grid;
-  grid-template-rows: minmax(0, 1fr) auto;
-  gap: 14px;
+  grid-template-rows: auto auto;
+  gap: 12px;
 }
 
 .ppt-focus-slide-visual {
   overflow: hidden;
-  border-radius: 18px;
-  min-height: 0;
+  border-radius: 14px;
+  aspect-ratio: 16 / 9;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.7), rgba(226, 232, 240, 0.9));
   border: 1px solid rgba(17, 24, 39, 0.06);
 }
@@ -1214,18 +1230,18 @@ h2 {
 
 .ppt-focus-slide-meta > div {
   display: grid;
-  gap: 8px;
-  padding: 12px;
-  border-radius: 16px;
-  background: rgba(255, 255, 255, 0.62);
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
   border: 1px solid rgba(17, 24, 39, 0.06);
 }
 
 .ppt-focus-slide-foot {
   display: grid;
-  gap: 8px;
-  padding-top: 2px;
-  border-top: 1px solid rgba(17, 24, 39, 0.06);
+  gap: 6px;
+  padding: 12px 0 2px;
+  border-top: 1px solid rgba(17, 24, 39, 0.07);
 }
 
 .ppt-focus-editor {
@@ -1323,7 +1339,11 @@ h2 {
     linear-gradient(145deg, rgba(17, 24, 39, 0.98), rgba(25, 34, 50, 0.94));
 }
 
-:root[data-theme="dark"] .ppt-focus-slide-shell,
+:root[data-theme="dark"] .ppt-focus-slide-shell {
+  background: rgba(15, 23, 42, 0.5);
+  border-color: rgba(226, 232, 240, 0.08);
+}
+
 :root[data-theme="dark"] .ppt-focus-slide-points,
 :root[data-theme="dark"] .ppt-focus-slide-meta > div,
 :root[data-theme="dark"] .ppt-focus-slide-visual {
