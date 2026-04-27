@@ -177,6 +177,7 @@ let galleryObserver: IntersectionObserver | null = null
 let libraryObserver: IntersectionObserver | null = null
 let toastTimer: number | null = null
 let librarySearchTimer: number | null = null
+let conversationLoadRequestId = 0
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
 
@@ -1502,6 +1503,14 @@ function persistActiveConversationId(conversationId: string, workspaceType: 'cre
   }
 }
 
+function clearLoadedConversationState(): void {
+  chatMessages.value = []
+  generatedImages.value = []
+  applyPptWorkspaceState(null)
+  selectedImageKey.value = ''
+  sharedImageKeys.value = []
+}
+
 function resetConversationState(): void {
   conversations.value = []
   currentConversationId.value = ''
@@ -1637,9 +1646,13 @@ async function refreshConversationIndex(): Promise<void> {
 }
 
 async function loadConversationById(conversationId: string): Promise<void> {
+  const requestId = ++conversationLoadRequestId
   conversationBusy.value = true
   try {
     const payload = await getConversation(conversationId)
+    if (requestId !== conversationLoadRequestId) {
+      return
+    }
     const workspaceType = payload.conversation.workspaceType === 'ppt' ? 'ppt' : 'create'
     conversations.value = sortConversations(conversations.value.map((conversation) => (
       conversation.id === payload.conversation.id
@@ -1658,7 +1671,9 @@ async function loadConversationById(conversationId: string): Promise<void> {
     sharedImageKeys.value = []
     restorePendingLoadingImages(payload.conversation.id)
   } finally {
-    conversationBusy.value = false
+    if (requestId === conversationLoadRequestId) {
+      conversationBusy.value = false
+    }
   }
 }
 
@@ -3979,6 +3994,10 @@ watch(activeView, async (view) => {
       const workspaceType = view === 'ppt' ? 'ppt' : 'create'
       const currentWorkspaceType = currentConversation.value?.workspaceType
       if (!currentConversationId.value || currentWorkspaceType !== workspaceType) {
+        conversationLoadRequestId += 1
+        conversationBusy.value = true
+        currentConversationId.value = ''
+        clearLoadedConversationState()
         await ensureConversationLoaded(workspaceType)
       }
     }
