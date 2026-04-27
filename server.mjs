@@ -1037,6 +1037,19 @@ function escapeXml(value) {
     .replace(/'/g, '&apos;')
 }
 
+function sanitizePersistedRemoteUrl(...values) {
+  for (const raw of values) {
+    const value = typeof raw === 'string' ? raw.trim() : ''
+    if (!value || value.startsWith('data:')) {
+      continue
+    }
+    if (/^https?:\/\//i.test(value) || value.startsWith('/')) {
+      return value
+    }
+  }
+  return null
+}
+
 function normalizePptExportRequest(body) {
   const rawPlan = body?.plan
   if (!rawPlan || typeof rawPlan !== 'object') {
@@ -2350,7 +2363,7 @@ async function normalizeStateForStorage(userId, state) {
       size: image.size,
       createdAt: image.createdAt,
       assetToken: asset?.public_token || null,
-      remoteUrl: imageRemoteUrl || imageUrl || imageDataUrl || null
+      remoteUrl: sanitizePersistedRemoteUrl(imageRemoteUrl, imageUrl)
     })
   }
 
@@ -2671,9 +2684,7 @@ async function upsertLibraryItemsForConversation(userId, conversationId, images)
     const assetToken = typeof image?.assetToken === 'string' && image.assetToken.trim()
       ? image.assetToken.trim()
       : null
-    const remoteUrl = typeof image?.remoteUrl === 'string' && image.remoteUrl.trim()
-      ? image.remoteUrl.trim()
-      : null
+    const remoteUrl = sanitizePersistedRemoteUrl(image?.remoteUrl, image?.image_url)
     if (!sourceImageId || (!assetToken && !remoteUrl)) {
       continue
     }
@@ -2970,7 +2981,7 @@ async function shareGalleryImage(user, body) {
   }
 
   const assetToken = image.assetToken || null
-  const remoteUrl = image.remoteUrl || null
+  const remoteUrl = sanitizePersistedRemoteUrl(image.remoteUrl, image.image_url)
   if (requestedAssetToken && assetToken !== requestedAssetToken) {
     throw appError(404, 'Generated image asset does not match this conversation')
   }
