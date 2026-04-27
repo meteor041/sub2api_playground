@@ -1065,7 +1065,8 @@ function normalizePptExportRequest(body) {
       visualDirection: typeof slide?.visualDirection === 'string' ? slide.visualDirection.trim() : '',
       speakerNotes: typeof slide?.speakerNotes === 'string' ? slide.speakerNotes.trim() : '',
       generationPrompt: typeof slide?.generationPrompt === 'string' ? slide.generationPrompt.trim() : '',
-      slideImageId: typeof slide?.slideImageId === 'string' && slide.slideImageId.trim() ? slide.slideImageId.trim() : ''
+      slideImageId: typeof slide?.slideImageId === 'string' && slide.slideImageId.trim() ? slide.slideImageId.trim() : '',
+      slideImageUrl: typeof slide?.slideImageUrl === 'string' && slide.slideImageUrl.trim() ? slide.slideImageUrl.trim() : ''
     }
   })
 

@@ -384,9 +384,29 @@ function imageForPptSlide(slide: PptSlidePlan): GeneratedImage | null {
   return generatedImages.value.find((image) => image.id === slide.slideImageId) || null
 }
 
-function previewUrlForPptSlide(slide: PptSlidePlan): string {
+function slideImageOriginalUrl(slide: PptSlidePlan): string {
   const image = imageForPptSlide(slide)
-  return image ? imagePreviewUrl(image, modalPreviewWidth) : ''
+  if (image) {
+    return imageDownloadUrl(image)
+  }
+  return slide.slideImageUrl || ''
+}
+
+function slideImagePreviewUrl(slide: PptSlidePlan, width = modalPreviewWidth): string {
+  const image = imageForPptSlide(slide)
+  if (image) {
+    return imagePreviewUrl(image, width)
+  }
+  const source = slide.slideImageUrl || ''
+  return buildCompressedPreviewUrl(source, width) || source
+}
+
+function handlePptSlideImageError(event: Event, slide: PptSlidePlan): void {
+  handleImageError(event, slideImageOriginalUrl(slide))
+}
+
+function previewUrlForPptSlide(slide: PptSlidePlan): string {
+  return slideImagePreviewUrl(slide, modalPreviewWidth)
 }
 
 const pptHeroTitle = computed(() => (
@@ -1213,7 +1233,8 @@ function normalizePptSlide(slide: Partial<PptSlidePlan>, fallbackPageNumber: num
     visualDirection: String(slide.visualDirection || '').trim(),
     speakerNotes: String(slide.speakerNotes || '').trim(),
     generationPrompt: String(slide.generationPrompt || '').trim(),
-    slideImageId: typeof slide.slideImageId === 'string' ? slide.slideImageId : undefined
+    slideImageId: typeof slide.slideImageId === 'string' ? slide.slideImageId : undefined,
+    slideImageUrl: typeof slide.slideImageUrl === 'string' ? slide.slideImageUrl : undefined
   }
 }
 
@@ -3621,7 +3642,8 @@ async function generatePptSlideImageAtIndex(slideIndex: number): Promise<Generat
 
   slides.splice(slideIndex, 1, {
     ...currentSlide,
-    slideImageId: nextImage.id
+    slideImageId: nextImage.id,
+    slideImageUrl: imageDownloadUrl(nextImage) || nextImage.image_url || nextImage.remoteUrl || undefined
   })
   pptPlan.value = pptPlan.value ? {
     ...pptPlan.value,
@@ -3705,7 +3727,7 @@ function buildPptExportHtml(): string {
     const image = slide.slideImageId
       ? generatedImages.value.find((item) => item.id === slide.slideImageId)
       : null
-    const imageSrc = image ? escapeHtml(imageDownloadUrl(image)) : ''
+    const imageSrc = escapeHtml(image ? imageDownloadUrl(image) : (slide.slideImageUrl || ''))
     const points = slide.keyPoints.map((point) => `<li>${escapeHtml(point)}</li>`).join('')
 
     return `
@@ -3896,10 +3918,7 @@ function buildPptExportRequest(): PptExportRequest {
       return []
     }
     const image = generatedImages.value.find((item) => item.id === slide.slideImageId)
-    if (!image) {
-      return []
-    }
-    const source = toAbsoluteAssetUrl(imageDownloadUrl(image))
+    const source = toAbsoluteAssetUrl(image ? imageDownloadUrl(image) : (slide.slideImageUrl || ''))
     if (!source) {
       return []
     }
@@ -4546,9 +4565,10 @@ onBeforeUnmount(() => {
                 <span class="ppt-overview-card-page">{{ String(index + 1).padStart(2, '0') }}</span>
                 <div class="ppt-overview-card-media">
                   <img
-                    v-if="imageForPptSlide(slide)"
+                    v-if="imageForPptSlide(slide) || slide.slideImageUrl"
                     :src="previewUrlForPptSlide(slide)"
                     :alt="slide.title"
+                    @error="handlePptSlideImageError($event, slide)"
                   />
                   <div v-else class="ppt-overview-card-placeholder">
                     <span>{{ index % 3 === 0 ? '📊' : index % 3 === 1 ? '💡' : '📈' }}</span>
@@ -4650,13 +4670,13 @@ onBeforeUnmount(() => {
                         </ul>
                       </section>
                       <aside class="ppt-focus-slide-aside">
-                        <div v-if="currentPptSlideImage" class="ppt-focus-slide-visual">
+                        <div v-if="currentPptSlideImage || currentPptSlide.slideImageUrl" class="ppt-focus-slide-visual">
                           <img
-                            :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                            :src="slideImagePreviewUrl(currentPptSlide)"
                             :alt="currentPptSlide.title"
                             loading="lazy"
-                            @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                            @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
+                            @error="handlePptSlideImageError($event, currentPptSlide)"
+                            @click="currentPptSlideImage ? openImageModal(currentPptSlideImage, currentPptSlideImageIndex) : undefined"
                           />
                         </div>
                         <div v-else class="ppt-focus-slide-visual placeholder">
@@ -4717,13 +4737,13 @@ onBeforeUnmount(() => {
               </section>
               <section class="ppt-slide-image-panel">
                 <span class="ppt-slide-label">本页配图</span>
-                <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
+                <div v-if="currentPptSlideImage || currentPptSlide.slideImageUrl" class="ppt-slide-image-wrap">
                   <img
-                    :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                    :src="slideImagePreviewUrl(currentPptSlide)"
                     :alt="currentPptSlide.title"
                     loading="lazy"
-                    @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                    @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
+                    @error="handlePptSlideImageError($event, currentPptSlide)"
+                    @click="currentPptSlideImage ? openImageModal(currentPptSlideImage, currentPptSlideImageIndex) : undefined"
                   />
                 </div>
                 <div v-else class="ppt-slide-image-empty">
@@ -4772,12 +4792,12 @@ onBeforeUnmount(() => {
                   </ul>
                 </section>
                 <aside class="ppt-focus-slide-aside">
-                  <div v-if="currentPptSlideImage" class="ppt-focus-slide-visual">
+                  <div v-if="currentPptSlideImage || currentPptSlide.slideImageUrl" class="ppt-focus-slide-visual">
                     <img
-                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                      :src="slideImagePreviewUrl(currentPptSlide)"
                       :alt="currentPptSlide.title"
                       loading="lazy"
-                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                      @error="handlePptSlideImageError($event, currentPptSlide)"
                     />
                   </div>
                   <div v-else class="ppt-focus-slide-visual placeholder">

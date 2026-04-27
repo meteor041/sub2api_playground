@@ -207,6 +207,7 @@ export interface PptSlidePlan {
   speakerNotes: string
   generationPrompt: string
   slideImageId?: string
+  slideImageUrl?: string
 }
 
 export interface PptPlanResult {
