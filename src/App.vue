@@ -340,6 +340,14 @@ const currentPptSlide = computed(() => {
   return slides[index] || null
 })
 
+const currentPptSlideImage = computed(() => {
+  const imageId = currentPptSlide.value?.slideImageId
+  if (!imageId) {
+    return null
+  }
+  return generatedImages.value.find((image) => image.id === imageId) || null
+})
+
 const activePendingTaskIds = new Set<string>()
 
 interface ResponseFunctionCall {
@@ -1142,7 +1150,8 @@ function normalizePptSlide(slide: Partial<PptSlidePlan>, fallbackPageNumber: num
     layout: String(slide.layout || '').trim(),
     visualDirection: String(slide.visualDirection || '').trim(),
     speakerNotes: String(slide.speakerNotes || '').trim(),
-    generationPrompt: String(slide.generationPrompt || '').trim()
+    generationPrompt: String(slide.generationPrompt || '').trim(),
+    slideImageId: typeof slide.slideImageId === 'string' ? slide.slideImageId : undefined
   }
 }
 
@@ -3261,6 +3270,78 @@ async function handleDeleteCurrentPptSlide(): Promise<void> {
   setSuccess('当前页已删除。')
 }
 
+async function handleGenerateCurrentPptSlideImage(): Promise<void> {
+  if (!currentPptSlide.value) {
+    setError('当前没有可生成图片的页面。')
+    return
+  }
+  if (!currentConversationId.value) {
+    await startNewConversation()
+  }
+
+  const apiKey = selectedKeySecret.value
+  const prompt = currentPptSlide.value.generationPrompt.trim()
+  if (!apiKey) {
+    setError('请先选择或创建一个 OpenAI 分组 API Key。')
+    return
+  }
+  if (!prompt) {
+    setError('当前页缺少可用于生成图片的提示词。')
+    return
+  }
+
+  const originConversationId = currentConversationId.value
+  if (!originConversationId) {
+    setError('请先创建会话。')
+    return
+  }
+
+  pptBusy.value = true
+  try {
+    const { task_id } = await createImageTask(
+      apiKey,
+      buildImageTaskPayload(prompt, '1536x864', [], originConversationId, 'direct')
+    )
+    const task = await waitForImageTask(task_id)
+    if (task.status === 'failed') {
+      throw new Error(task.error || 'PPT 页面图片生成失败')
+    }
+
+    const images = extractGeneratedImagesFromTask(task)
+    const nextImage = images[0]
+    if (!nextImage) {
+      throw new Error('图片生成成功，但没有返回可展示的结果。')
+    }
+
+    const nextGeneratedImages = normalizeGeneratedImages([
+      nextImage,
+      ...generatedImages.value.filter((image) => image.id !== nextImage.id)
+    ])
+    const slides = [...(pptPlan.value?.slides || [])]
+    const currentSlide = slides[pptCurrentSlideIndex.value]
+    if (!currentSlide) {
+      throw new Error('当前页已丢失，请刷新后重试。')
+    }
+
+    slides.splice(pptCurrentSlideIndex.value, 1, {
+      ...currentSlide,
+      slideImageId: nextImage.id
+    })
+    pptPlan.value = pptPlan.value ? {
+      ...pptPlan.value,
+      slides: normalizePptSlides(slides)
+    } : null
+    generatedImages.value = nextGeneratedImages
+    await persistPptConversationState()
+    await refreshBalanceOnly()
+    setSuccess('当前页图片已生成。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '当前页图片生成失败')
+  } finally {
+    pptBusy.value = false
+  }
+}
+
 async function handleMoveCurrentPptSlide(direction: -1 | 1): Promise<void> {
   if (!pptPlan.value || !currentPptSlide.value) {
     setError('当前没有可移动的页面。')
@@ -3814,6 +3895,14 @@ onBeforeUnmount(() => {
               <button
                 class="ghost mini"
                 type="button"
+                :disabled="pptBusy || !currentPptSlide"
+                @click="handleGenerateCurrentPptSlideImage"
+              >
+                生成本页图片
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
                 :disabled="pptBusy || !currentPptSlide || pptCurrentSlideIndex <= 0"
                 @click="handleMoveCurrentPptSlide(-1)"
               >
@@ -3918,6 +4007,24 @@ onBeforeUnmount(() => {
                   <span class="ppt-slide-label">本页制作 Prompt</span>
                   <p>{{ currentPptSlide.generationPrompt }}</p>
                 </section>
+                <section class="ppt-slide-image-panel">
+                  <span class="ppt-slide-label">本页配图</span>
+                  <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
+                    <img
+                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                      :alt="currentPptSlide.title"
+                      loading="lazy"
+                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                      @click="openImageModal(currentPptSlideImage, generatedImages.findIndex((image) => image.id === currentPptSlideImage.id))"
+                    />
+                  </div>
+                  <div v-else class="ppt-slide-image-empty">
+                    <span>当前页还没有生成配图。</span>
+                    <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                      {{ pptBusy ? '生成中...' : '生成本页图片' }}
+                    </button>
+                  </div>
+                </section>
               </article>
               <button
                 v-if="pptSlides.length > 1"
@@ -4019,6 +4126,9 @@ onBeforeUnmount(() => {
               />
             </label>
             <div class="ppt-editor-actions">
+              <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                生成本页图片
+              </button>
               <button
                 class="secondary mini"
                 type="button"

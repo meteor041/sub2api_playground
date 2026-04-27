@@ -672,6 +672,7 @@ h2 {
 .ppt-slide-points,
 .ppt-slide-notes,
 .ppt-slide-prompt,
+.ppt-slide-image-panel,
 .ppt-plan-summary section {
   display: grid;
   gap: 10px;
@@ -686,6 +687,27 @@ h2 {
   padding-left: 1.1rem;
   color: var(--ink);
   line-height: 1.65;
+}
+
+.ppt-slide-image-wrap,
+.ppt-slide-image-empty {
+  display: grid;
+  gap: 12px;
+}
+
+.ppt-slide-image-wrap img {
+  width: 100%;
+  border-radius: 18px;
+  object-fit: cover;
+  aspect-ratio: 16 / 9;
+  cursor: zoom-in;
+  background: var(--tile-bg);
+}
+
+.ppt-slide-image-empty {
+  place-items: start;
+  min-height: 120px;
+  color: var(--muted);
 }
 
 .ppt-slide-strip {

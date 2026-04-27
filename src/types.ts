@@ -203,6 +203,7 @@ export interface PptSlidePlan {
   visualDirection: string
   speakerNotes: string
   generationPrompt: string
+  slideImageId?: string
 }
 
 export interface PptPlanResult {
