@@ -444,6 +444,11 @@ function buildImageFilename(seed: string, index = 1, extension = '.png'): string
   return `${safeSeed}-${index}${extension}`
 }
 
+function buildDocumentFilename(seed: string, extension = '.html'): string {
+  const safeSeed = sanitizeFilenamePart(seed) || 'playground-document'
+  return `${safeSeed}${extension}`
+}
+
 function inferImageExtension(source: string, mimeType = ''): string {
   const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() || ''
   if (normalizedMimeType && imageExtensionByMime[normalizedMimeType]) {
@@ -1070,6 +1075,15 @@ function triggerDownload(url: string, filename: string): void {
 
 function normalizeLineEndings(value: string): string {
   return value.replace(/\r\n/g, '\n')
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
 }
 
 function extractJsonBlock(value: string): string {
@@ -2464,6 +2478,13 @@ async function downloadImage(source: string, filenameSeed: string, index = 1): P
   }
 }
 
+function downloadTextFile(content: string, filename: string, mimeType = 'text/plain;charset=utf-8'): void {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  triggerDownload(url, filename)
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
+
 function openComposerFilePicker(): void {
   composerFileInput.value?.click()
 }
@@ -3411,6 +3432,196 @@ async function handleGenerateAllPptSlideImages(): Promise<void> {
   }
 }
 
+function buildPptExportHtml(): string {
+  const plan = pptPlan.value
+  if (!plan) {
+    throw new Error('当前没有可导出的 PPT 方案。')
+  }
+
+  const slidesMarkup = plan.slides.map((slide) => {
+    const image = slide.slideImageId
+      ? generatedImages.value.find((item) => item.id === slide.slideImageId)
+      : null
+    const imageSrc = image ? escapeHtml(imageDownloadUrl(image)) : ''
+    const points = slide.keyPoints.map((point) => `<li>${escapeHtml(point)}</li>`).join('')
+
+    return `
+      <section class="slide">
+        <div class="slide-header">
+          <span class="slide-index">第 ${slide.pageNumber} 页</span>
+          <h2>${escapeHtml(slide.title)}</h2>
+          <p class="slide-objective">${escapeHtml(slide.objective)}</p>
+        </div>
+        <div class="slide-grid">
+          <article class="card">
+            <h3>版式</h3>
+            <p>${escapeHtml(slide.layout)}</p>
+          </article>
+          <article class="card">
+            <h3>视觉方向</h3>
+            <p>${escapeHtml(slide.visualDirection)}</p>
+          </article>
+        </div>
+        <article class="card">
+          <h3>核心内容</h3>
+          <ul>${points}</ul>
+        </article>
+        <article class="card">
+          <h3>讲述建议</h3>
+          <p>${escapeHtml(slide.speakerNotes)}</p>
+        </article>
+        <article class="card">
+          <h3>制作 Prompt</h3>
+          <p>${escapeHtml(slide.generationPrompt)}</p>
+        </article>
+        ${imageSrc ? `
+          <article class="card slide-image-card">
+            <h3>本页配图</h3>
+            <img src="${imageSrc}" alt="${escapeHtml(slide.title)}" />
+          </article>
+        ` : ''}
+      </section>
+    `
+  }).join('\n')
+
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${escapeHtml(plan.projectTitle || 'PPT 导出')}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #eef2f7;
+      --ink: #1f2937;
+      --muted: #6b7280;
+      --line: #d8dee8;
+      --card: #ffffff;
+      --accent: #ff4f2e;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Aptos", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
+    }
+    .deck {
+      width: min(1200px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0 56px;
+    }
+    .deck-header {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 28px;
+    }
+    .deck-header h1 {
+      margin: 0;
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      line-height: 1.04;
+    }
+    .deck-meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 18px 20px;
+      background: var(--card);
+      box-shadow: 0 18px 44px rgba(15, 23, 42, 0.08);
+    }
+    .card h3 {
+      margin: 0 0 10px;
+      font-size: 0.92rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+    .card p, .card li {
+      color: var(--muted);
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+    .slide {
+      display: grid;
+      gap: 16px;
+      padding: 26px 0;
+      border-top: 1px solid var(--line);
+    }
+    .slide:first-of-type { border-top: 0; }
+    .slide-header {
+      display: grid;
+      gap: 10px;
+    }
+    .slide-index {
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+    }
+    .slide-header h2 {
+      margin: 0;
+      font-size: clamp(1.6rem, 3vw, 2.6rem);
+      line-height: 1.06;
+    }
+    .slide-objective {
+      margin: 0;
+      color: var(--muted);
+    }
+    .slide-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .slide-image-card img {
+      width: 100%;
+      border-radius: 16px;
+      object-fit: cover;
+      aspect-ratio: 16 / 9;
+      background: #e5e7eb;
+    }
+    @media (max-width: 820px) {
+      .deck { width: min(100%, calc(100% - 20px)); padding: 20px 0 40px; }
+      .slide-grid, .deck-meta { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="deck">
+    <header class="deck-header">
+      <span class="slide-index">PPT Export</span>
+      <h1>${escapeHtml(plan.projectTitle)}</h1>
+      <div class="deck-meta">
+        <article class="card"><h3>整套摘要</h3><p>${escapeHtml(plan.summary)}</p></article>
+        <article class="card"><h3>受众</h3><p>${escapeHtml(plan.targetAudience)}</p></article>
+        <article class="card"><h3>叙事路径</h3><p>${escapeHtml(plan.narrativeFlow)}</p></article>
+        <article class="card"><h3>统一视觉系统</h3><p>${escapeHtml(plan.visualSystem)}</p></article>
+      </div>
+    </header>
+    ${slidesMarkup}
+  </main>
+</body>
+</html>`
+}
+
+function handleExportPptHtml(): void {
+  try {
+    const plan = pptPlan.value
+    if (!plan) {
+      throw new Error('当前没有可导出的 PPT 方案。')
+    }
+    downloadTextFile(buildPptExportHtml(), buildDocumentFilename(plan.projectTitle || 'ppt-export', '.html'), 'text/html;charset=utf-8')
+    setSuccess('PPT HTML 已导出。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '导出 HTML 失败')
+  }
+}
+
 async function handleMoveCurrentPptSlide(direction: -1 | 1): Promise<void> {
   if (!pptPlan.value || !currentPptSlide.value) {
     setError('当前没有可移动的页面。')
@@ -3964,6 +4175,14 @@ onBeforeUnmount(() => {
               <button
                 class="ghost mini"
                 type="button"
+                :disabled="!pptPlan"
+                @click="handleExportPptHtml"
+              >
+                导出 HTML
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
                 :disabled="pptBusy || !pptPlan || pptSlides.length === 0"
                 @click="handleGenerateAllPptSlideImages"
               >
@@ -4203,6 +4422,9 @@ onBeforeUnmount(() => {
               />
             </label>
             <div class="ppt-editor-actions">
+              <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptHtml">
+                导出 HTML
+              </button>
               <button class="secondary mini" type="button" :disabled="pptBusy || !pptPlan || pptSlides.length === 0" @click="handleGenerateAllPptSlideImages">
                 生成整套图片
               </button>
