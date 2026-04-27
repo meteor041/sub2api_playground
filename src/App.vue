@@ -330,6 +330,8 @@ const currentConversation = computed(() => (
   conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
 
+const pptTaskRecords = computed(() => conversations.value)
+
 const pptSlides = computed(() => pptPlan.value?.slides || [])
 
 const currentPptSlide = computed(() => {
@@ -1555,6 +1557,36 @@ async function startNewConversation(): Promise<void> {
   } finally {
     conversationBusy.value = false
   }
+}
+
+async function startNewPptTask(): Promise<void> {
+  conversationBusy.value = true
+  try {
+    const created = await createConversation('新 PPT 任务')
+    conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
+    persistActiveConversationId(created.id)
+    chatMessages.value = []
+    generatedImages.value = []
+    applyPptWorkspaceState(null)
+    pptSlideEditPrompt.value = ''
+    selectedImageKey.value = ''
+    sharedImageKeys.value = []
+    activeView.value = 'ppt'
+    setSuccess('已创建新的 PPT 任务。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '创建 PPT 任务失败')
+  } finally {
+    conversationBusy.value = false
+  }
+}
+
+async function handlePptTaskSelect(conversationId: string): Promise<void> {
+  if (!conversationId) {
+    return
+  }
+  currentConversationId.value = conversationId
+  activeView.value = 'ppt'
+  await handleConversationSelect()
 }
 
 async function ensureConversationLoaded(): Promise<void> {
@@ -4199,6 +4231,30 @@ onBeforeUnmount(() => {
               <button class="secondary mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click="handleInsertPptSlideAfter">
                 插入新页
               </button>
+            </div>
+          </div>
+
+          <div class="ppt-task-records">
+            <div class="ppt-task-records-header">
+              <span class="ppt-slide-label">任务记录</span>
+              <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewPptTask">
+                新建任务
+              </button>
+            </div>
+            <div class="ppt-task-records-list">
+              <button
+                v-for="conversation in pptTaskRecords"
+                :key="conversation.id"
+                class="ppt-task-record"
+                :class="{ active: conversation.id === currentConversationId }"
+                type="button"
+                :disabled="conversationBusy"
+                @click="handlePptTaskSelect(conversation.id)"
+              >
+                <strong>{{ conversation.title }}</strong>
+                <span>{{ conversation.updatedAt }}</span>
+              </button>
+              <p v-if="pptTaskRecords.length === 0" class="empty">还没有任务记录。</p>
             </div>
           </div>
 

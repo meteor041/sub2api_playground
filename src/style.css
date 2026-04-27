@@ -778,6 +778,52 @@ h2 {
   flex-wrap: wrap;
 }
 
+.ppt-task-records,
+.ppt-task-records-list {
+  display: grid;
+  gap: 12px;
+}
+
+.ppt-task-records {
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+
+.ppt-task-records-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ppt-task-record {
+  display: grid;
+  gap: 6px;
+  border-radius: 18px;
+  padding: 14px 16px;
+  color: var(--ink);
+  background: var(--ghost-bg);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+  text-align: left;
+}
+
+.ppt-task-record strong {
+  font-size: 0.94rem;
+  line-height: 1.4;
+}
+
+.ppt-task-record span {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.ppt-task-record.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline: 1px solid rgba(255, 79, 46, 0.22);
+}
+
 .library-header {
   display: grid;
   grid-template-columns: minmax(240px, 1fr) auto;

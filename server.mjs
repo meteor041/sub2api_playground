@@ -1574,10 +1574,21 @@ function cleanupTasks() {
 function deriveConversationTitle(state) {
   const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
   const firstUserMessage = chatMessages.find((message) => message?.role === 'user' && typeof message?.content === 'string' && message.content.trim())
-  if (!firstUserMessage) {
-    return '新会话'
+  if (firstUserMessage) {
+    return firstUserMessage.content.trim().slice(0, 48) || '新会话'
   }
-  return firstUserMessage.content.trim().slice(0, 48) || '新会话'
+
+  const pptState = state?.pptState && typeof state.pptState === 'object' ? state.pptState : null
+  const projectTitle = typeof pptState?.plan?.projectTitle === 'string' ? pptState.plan.projectTitle.trim() : ''
+  if (projectTitle) {
+    return projectTitle.slice(0, 48)
+  }
+  const prompt = typeof pptState?.prompt === 'string' ? pptState.prompt.trim() : ''
+  if (prompt) {
+    return prompt.slice(0, 48)
+  }
+
+  return '新会话'
 }
 
 function stateEnvelope(state) {

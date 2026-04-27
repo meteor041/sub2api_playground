@@ -588,16 +588,28 @@ function touchConversation(conversation: MockConversation): void {
   const updatedAt = nowIso()
   conversation.updatedAt = updatedAt
   conversation.lastMessageAt = conversation.state.chatMessages.length > 0 ? updatedAt : null
-  conversation.title = deriveConversationTitle(conversation.state.chatMessages)
+  conversation.title = deriveConversationTitle(conversation.state)
 }
 
-function deriveConversationTitle(messages: JsonRecord[]): string {
+function deriveConversationTitle(state: { chatMessages?: JsonRecord[]; pptState?: JsonRecord | null }): string {
+  const messages = Array.isArray(state.chatMessages) ? state.chatMessages : []
   const firstUserMessage = messages.find((message) => message.role === 'user')
   const title = extractMessageText(firstUserMessage).trim()
-  if (!title) {
-    return '新会话'
+  if (title) {
+    return title.length > 28 ? `${title.slice(0, 28)}...` : title
   }
-  return title.length > 28 ? `${title.slice(0, 28)}...` : title
+
+  const pptState = state.pptState && typeof state.pptState === 'object' ? state.pptState : null
+  const projectTitle = typeof pptState?.plan?.projectTitle === 'string' ? pptState.plan.projectTitle.trim() : ''
+  if (projectTitle) {
+    return projectTitle.length > 28 ? `${projectTitle.slice(0, 28)}...` : projectTitle
+  }
+  const prompt = typeof pptState?.prompt === 'string' ? pptState.prompt.trim() : ''
+  if (prompt) {
+    return prompt.length > 28 ? `${prompt.slice(0, 28)}...` : prompt
+  }
+
+  return '新会话'
 }
 
 function extractMessageText(message: unknown): string {
