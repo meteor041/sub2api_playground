@@ -8,6 +8,7 @@ import {
   createImageTask,
   createPptConversation,
   deleteLibraryItem,
+  exportPptPresentation,
   getConversation,
   getImageTask,
   getProfile,
@@ -36,6 +37,7 @@ import type {
   LibraryFacet,
   LibraryItem,
   PptPlanResult,
+  PptExportRequest,
   PptSlidePlan,
   PptWorkspaceState,
   UserProfile
@@ -2504,6 +2506,12 @@ function downloadTextFile(content: string, filename: string, mimeType = 'text/pl
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
 }
 
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  triggerDownload(url, filename)
+  window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}
+
 function openComposerFilePicker(): void {
   composerFileInput.value?.click()
 }
@@ -3649,6 +3657,50 @@ function handleExportPptHtml(): void {
   }
 }
 
+function buildPptExportRequest(): PptExportRequest {
+  const plan = pptPlan.value
+  if (!plan) {
+    throw new Error('当前没有可导出的 PPT 方案。')
+  }
+
+  const slideImages = plan.slides.flatMap((slide) => {
+    if (!slide.slideImageId) {
+      return []
+    }
+    const image = generatedImages.value.find((item) => item.id === slide.slideImageId)
+    if (!image) {
+      return []
+    }
+    const source = toAbsoluteAssetUrl(imageDownloadUrl(image))
+    if (!source) {
+      return []
+    }
+    return [{
+      slideImageId: slide.slideImageId,
+      source
+    }]
+  })
+
+  return {
+    plan,
+    slideImages
+  }
+}
+
+async function handleExportPptPresentation(): Promise<void> {
+  try {
+    const plan = pptPlan.value
+    if (!plan) {
+      throw new Error('当前没有可导出的 PPT 方案。')
+    }
+    const blob = await exportPptPresentation(buildPptExportRequest())
+    downloadBlob(blob, buildDocumentFilename(plan.projectTitle || 'ppt-export', '.pptx'))
+    setSuccess('PPTX 已导出。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '导出 PPTX 失败')
+  }
+}
+
 async function handleMoveCurrentPptSlide(direction: -1 | 1): Promise<void> {
   if (!pptPlan.value || !currentPptSlide.value) {
     setError('当前没有可移动的页面。')
@@ -4203,6 +4255,14 @@ onBeforeUnmount(() => {
                 class="ghost mini"
                 type="button"
                 :disabled="!pptPlan"
+                @click="handleExportPptPresentation"
+              >
+                导出 PPTX
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="!pptPlan"
                 @click="handleExportPptHtml"
               >
                 导出 HTML
@@ -4473,6 +4533,9 @@ onBeforeUnmount(() => {
               />
             </label>
             <div class="ppt-editor-actions">
+              <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptPresentation">
+                导出 PPTX
+              </button>
               <button class="secondary mini" type="button" :disabled="!pptPlan" @click="handleExportPptHtml">
                 导出 HTML
               </button>

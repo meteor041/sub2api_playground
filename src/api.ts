@@ -11,6 +11,7 @@ import type {
   LibraryItem,
   LibraryPage,
   LoginResponse,
+  PptExportRequest,
   PaginatedResponse,
   ShareGalleryResponse,
   UserProfile
@@ -460,4 +461,26 @@ export function saveConversationState(
       body: JSON.stringify(payload)
     }
   )
+}
+
+export async function exportPptPresentation(payload: PptExportRequest): Promise<Blob> {
+  const headers = new Headers()
+  headers.set('Content-Type', 'application/json')
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(apiUrl('/api/playground/ppt/export'), {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload)
+  })
+
+  if (!response.ok) {
+    const data = await readJson(response)
+    throw new Error(extractError(data, `PPT export failed: HTTP ${response.status}`))
+  }
+
+  return response.blob()
 }

@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -172,6 +174,15 @@ function resolveRateLimitRule(req, url) {
       limit: 10,
       windowMs: 10 * 1000,
       message: '分享操作过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/playground/ppt/export') {
+    return {
+      key: 'ppt-export',
+      limit: 6,
+      windowMs: 60 * 1000,
+      message: '导出 PPT 过于频繁，请稍后再试'
     }
   }
 
@@ -1014,6 +1025,557 @@ async function fetchImageUrlBuffer(value, fallbackMimeType = 'image/png') {
   return {
     buffer: Buffer.from(await response.arrayBuffer()),
     mimeType
+  }
+}
+
+function escapeXml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
+function normalizePptExportRequest(body) {
+  const rawPlan = body?.plan
+  if (!rawPlan || typeof rawPlan !== 'object') {
+    throw appError(400, 'PPT plan is required')
+  }
+
+  const rawSlides = Array.isArray(rawPlan.slides) ? rawPlan.slides.slice(0, 30) : []
+  if (rawSlides.length === 0) {
+    throw appError(400, 'At least one PPT slide is required')
+  }
+
+  const slides = rawSlides.map((slide, index) => {
+    const keyPoints = Array.isArray(slide?.keyPoints)
+      ? slide.keyPoints
+        .map((item) => (typeof item === 'string' ? item.trim() : ''))
+        .filter(Boolean)
+        .slice(0, 8)
+      : []
+
+    return {
+      pageNumber: Number.isInteger(slide?.pageNumber) && slide.pageNumber > 0 ? slide.pageNumber : index + 1,
+      title: typeof slide?.title === 'string' && slide.title.trim() ? slide.title.trim() : `第 ${index + 1} 页`,
+      objective: typeof slide?.objective === 'string' ? slide.objective.trim() : '',
+      keyPoints,
+      layout: typeof slide?.layout === 'string' ? slide.layout.trim() : '',
+      visualDirection: typeof slide?.visualDirection === 'string' ? slide.visualDirection.trim() : '',
+      speakerNotes: typeof slide?.speakerNotes === 'string' ? slide.speakerNotes.trim() : '',
+      generationPrompt: typeof slide?.generationPrompt === 'string' ? slide.generationPrompt.trim() : '',
+      slideImageId: typeof slide?.slideImageId === 'string' && slide.slideImageId.trim() ? slide.slideImageId.trim() : ''
+    }
+  })
+
+  const slideImages = new Map()
+  const rawSlideImages = Array.isArray(body?.slideImages) ? body.slideImages : []
+  for (const item of rawSlideImages) {
+    const slideImageId = typeof item?.slideImageId === 'string' ? item.slideImageId.trim() : ''
+    const source = typeof item?.source === 'string' ? item.source.trim() : ''
+    if (slideImageId && source) {
+      slideImages.set(slideImageId, source)
+    }
+  }
+
+  return {
+    plan: {
+      projectTitle: typeof rawPlan.projectTitle === 'string' ? rawPlan.projectTitle.trim() : 'PPT Export',
+      summary: typeof rawPlan.summary === 'string' ? rawPlan.summary.trim() : '',
+      targetAudience: typeof rawPlan.targetAudience === 'string' ? rawPlan.targetAudience.trim() : '',
+      narrativeFlow: typeof rawPlan.narrativeFlow === 'string' ? rawPlan.narrativeFlow.trim() : '',
+      visualSystem: typeof rawPlan.visualSystem === 'string' ? rawPlan.visualSystem.trim() : '',
+      slides
+    },
+    slideImages
+  }
+}
+
+function requestOrigin(req) {
+  if (publicOrigin) {
+    return publicOrigin
+  }
+  const host = req.headers?.['x-forwarded-host'] || req.headers?.host || `127.0.0.1:${port}`
+  const protocol = req.headers?.['x-forwarded-proto'] || 'http'
+  return `${protocol}://${host}`
+}
+
+async function loadPptExportImage(userId, req, source) {
+  const trimmed = String(source || '').trim()
+  if (!trimmed) {
+    return null
+  }
+
+  if (trimmed.startsWith('data:')) {
+    return dataUrlToBuffer(trimmed, 'image/png')
+  }
+
+  const assetToken = assetTokenFromUrl(trimmed)
+  if (assetToken) {
+    const asset = await getAssetByToken(assetToken)
+    if (!asset) {
+      throw appError(404, 'PPT export image not found')
+    }
+    if (Number(asset.user_id) !== Number(userId)) {
+      throw appError(403, 'PPT export image access denied')
+    }
+    return loadAssetBuffer(asset)
+  }
+
+  const absoluteUrl = /^https?:\/\//i.test(trimmed)
+    ? trimmed
+    : `${requestOrigin(req)}${trimmed.startsWith('/') ? trimmed : `/${trimmed}`}`
+  return fetchImageUrlBuffer(absoluteUrl, 'image/png')
+}
+
+function buildPptTextParagraphs(lines, options = {}) {
+  const fontSize = Number.isFinite(options.fontSize) ? options.fontSize : 1800
+  const bold = options.bold ? ' b="1"' : ''
+  const color = options.color ? `<a:solidFill><a:srgbClr val="${options.color}"/></a:solidFill>` : ''
+  const paragraphs = lines
+    .filter((line) => typeof line === 'string' && line.trim())
+    .map((line) => `      <a:p><a:pPr algn="l"/><a:r><a:rPr lang="zh-CN" sz="${fontSize}"${bold}>${color}</a:rPr><a:t>${escapeXml(line)}</a:t></a:r><a:endParaRPr lang="zh-CN" sz="${fontSize}"${bold}/></a:p>`)
+  if (paragraphs.length === 0) {
+    return `      <a:p><a:endParaRPr lang="zh-CN" sz="${fontSize}"${bold}/></a:p>`
+  }
+  return paragraphs.join('\n')
+}
+
+function buildPptTextBox(id, name, x, y, cx, cy, lines, options = {}) {
+  const noFill = options.fill ? '' : '<a:noFill/>'
+  const fill = options.fill ? `<a:solidFill><a:srgbClr val="${options.fill}"/></a:solidFill>` : ''
+  const line = options.line ? `<a:ln w="12700"><a:solidFill><a:srgbClr val="${options.line}"/></a:solidFill></a:ln>` : '<a:ln><a:noFill/></a:ln>'
+  const bodyPr = options.bodyPr || 'wrap="square" rtlCol="0" anchor="t"'
+  return `    <p:sp>
+      <p:nvSpPr>
+        <p:cNvPr id="${id}" name="${escapeXml(name)}"/>
+        <p:cNvSpPr txBox="1"/>
+        <p:nvPr/>
+      </p:nvSpPr>
+      <p:spPr>
+        <a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
+        <a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>
+        ${fill || noFill}
+        ${line}
+      </p:spPr>
+      <p:txBody>
+        <a:bodyPr ${bodyPr}/>
+        <a:lstStyle/>
+${buildPptTextParagraphs(lines, options)}
+      </p:txBody>
+    </p:sp>`
+}
+
+function buildPptPicture(id, name, relId, x, y, cx, cy) {
+  return `    <p:pic>
+      <p:nvPicPr>
+        <p:cNvPr id="${id}" name="${escapeXml(name)}"/>
+        <p:cNvPicPr><a:picLocks noChangeAspect="1"/></p:cNvPicPr>
+        <p:nvPr/>
+      </p:nvPicPr>
+      <p:blipFill>
+        <a:blip r:embed="${relId}"/>
+        <a:stretch><a:fillRect/></a:stretch>
+      </p:blipFill>
+      <p:spPr>
+        <a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
+        <a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>
+        <a:ln w="12700"><a:solidFill><a:srgbClr val="D0D7E2"/></a:solidFill></a:ln>
+      </p:spPr>
+    </p:pic>`
+}
+
+function buildSlideXml(slide, imageRelId = '') {
+  const hasImage = Boolean(imageRelId)
+  const contentWidth = hasImage ? 5922000 : 10515600
+  const bodyLines = slide.keyPoints.length > 0
+    ? slide.keyPoints.map((item) => `• ${item}`)
+    : ['• 暂无要点']
+  const summaryLines = [
+    slide.objective,
+    slide.layout ? `版式：${slide.layout}` : '',
+    slide.visualDirection ? `视觉：${slide.visualDirection}` : ''
+  ].filter(Boolean)
+
+  const shapes = [
+    buildPptTextBox(2, 'Title', 457200, 320040, 10515600, 762000, [slide.title], {
+      fontSize: 2600,
+      bold: true,
+      color: '172033'
+    }),
+    buildPptTextBox(3, 'Summary', 457200, 1219200, contentWidth, 1143000, summaryLines, {
+      fontSize: 1600,
+      fill: 'F6F8FB',
+      line: 'DDE5EF',
+      color: '334155',
+      bodyPr: 'wrap="square" rtlCol="0" anchor="ctr" lIns="182880" rIns="182880" tIns="121920" bIns="121920"'
+    }),
+    buildPptTextBox(4, 'Key Points', 457200, 2514600, contentWidth, 2540000, bodyLines, {
+      fontSize: 1800,
+      color: '111827'
+    }),
+    buildPptTextBox(5, 'Speaker Notes', 457200, 5257800, 10515600, 1097280, [
+      slide.speakerNotes || '讲述建议：按这一页的目标串联上下文，并聚焦一个主要信息点。'
+    ], {
+      fontSize: 1400,
+      fill: 'FFF4ED',
+      line: 'FDBA74',
+      color: '7C2D12',
+      bodyPr: 'wrap="square" rtlCol="0" anchor="t" lIns="182880" rIns="182880" tIns="121920" bIns="121920"'
+    })
+  ]
+
+  if (hasImage) {
+    shapes.push(buildPptPicture(6, 'Slide Image', imageRelId, 6858000, 1219200, 4069080, 3048000))
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld>
+    <p:bg>
+      <p:bgPr>
+        <a:solidFill><a:srgbClr val="FBFCFE"/></a:solidFill>
+        <a:effectLst/>
+      </p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="0" cy="0"/>
+          <a:chOff x="0" y="0"/>
+          <a:chExt cx="0" cy="0"/>
+        </a:xfrm>
+      </p:grpSpPr>
+${shapes.join('\n')}
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sld>`
+}
+
+function buildSlideRelsXml(imageRelId = '', imageTarget = '') {
+  const imageRelationship = imageRelId && imageTarget
+    ? `\n  <Relationship Id="${imageRelId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${escapeXml(imageTarget)}"/>`
+    : ''
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>${imageRelationship}
+</Relationships>`
+}
+
+function buildPresentationXml(slideCount) {
+  const slideIds = Array.from({ length: slideCount }, (_, index) => (
+    `    <p:sldId id="${256 + index}" r:id="rId${index + 2}"/>`
+  )).join('\n')
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" saveSubsetFonts="1" autoCompressPictures="0">
+  <p:sldMasterIdLst>
+    <p:sldMasterId id="2147483648" r:id="rId1"/>
+  </p:sldMasterIdLst>
+  <p:sldIdLst>
+${slideIds}
+  </p:sldIdLst>
+  <p:sldSz cx="12192000" cy="6858000" type="screen16x9"/>
+  <p:notesSz cx="6858000" cy="9144000"/>
+  <p:defaultTextStyle/>
+</p:presentation>`
+}
+
+function buildPresentationRelsXml(slideCount) {
+  const slideRelationships = Array.from({ length: slideCount }, (_, index) => (
+    `  <Relationship Id="rId${index + 2}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${index + 1}.xml"/>`
+  )).join('\n')
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="slideMasters/slideMaster1.xml"/>
+${slideRelationships}
+</Relationships>`
+}
+
+function buildContentTypesXml(slideCount, imageExtensions) {
+  const imageDefaults = Array.from(imageExtensions)
+    .map((ext) => {
+      if (ext === 'png') return '  <Default Extension="png" ContentType="image/png"/>'
+      if (ext === 'jpg' || ext === 'jpeg') return '  <Default Extension="jpg" ContentType="image/jpeg"/>'
+      if (ext === 'webp') return '  <Default Extension="webp" ContentType="image/webp"/>'
+      if (ext === 'gif') return '  <Default Extension="gif" ContentType="image/gif"/>'
+      return ''
+    })
+    .filter(Boolean)
+    .join('\n')
+  const slideOverrides = Array.from({ length: slideCount }, (_, index) => (
+    `  <Override PartName="/ppt/slides/slide${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`
+  )).join('\n')
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+${imageDefaults ? `${imageDefaults}\n` : ''}  <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
+  <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
+  <Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>
+  <Override PartName="/ppt/presProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presProps+xml"/>
+  <Override PartName="/ppt/viewProps.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.viewProps+xml"/>
+  <Override PartName="/ppt/tableStyles.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.tableStyles+xml"/>
+  <Override PartName="/ppt/slideMasters/slideMaster1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml"/>
+  <Override PartName="/ppt/slideLayouts/slideLayout1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml"/>
+  <Override PartName="/ppt/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>
+${slideOverrides}
+</Types>`
+}
+
+function buildPptxTemplateFiles(title, slideCount) {
+  const safeTitle = escapeXml(title || 'PPT Export')
+  const now = new Date().toISOString()
+  return {
+    '[Content_Types].xml': null,
+    '_rels/.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
+</Relationships>`,
+    'docProps/app.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes">
+  <Application>Microsoft Office PowerPoint</Application>
+  <PresentationFormat>Widescreen</PresentationFormat>
+  <Slides>${slideCount}</Slides>
+  <Notes>0</Notes>
+  <HiddenSlides>0</HiddenSlides>
+  <MMClips>0</MMClips>
+  <ScaleCrop>false</ScaleCrop>
+  <Company>MeteorAPI</Company>
+  <LinksUpToDate>false</LinksUpToDate>
+  <SharedDoc>false</SharedDoc>
+  <HyperlinksChanged>false</HyperlinksChanged>
+  <AppVersion>16.0000</AppVersion>
+</Properties>`,
+    'docProps/core.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:dcmitype="http://purl.org/dc/dcmitype/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <dc:title>${safeTitle}</dc:title>
+  <dc:creator>MeteorAPI Playground</dc:creator>
+  <cp:lastModifiedBy>MeteorAPI Playground</cp:lastModifiedBy>
+  <dcterms:created xsi:type="dcterms:W3CDTF">${now}</dcterms:created>
+  <dcterms:modified xsi:type="dcterms:W3CDTF">${now}</dcterms:modified>
+</cp:coreProperties>`,
+    'ppt/presProps.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:presentationPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`,
+    'ppt/viewProps.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:viewPr xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:normalViewPr showOutlineIcons="0" snapVertSplitter="1">
+    <p:restoredLeft sz="15620"/>
+    <p:restoredTop sz="94660"/>
+  </p:normalViewPr>
+  <p:slideViewPr>
+    <p:cSldViewPr showGuides="1" snapToGrid="1" snapToObjects="1"/>
+  </p:slideViewPr>
+  <p:notesTextViewPr/>
+  <p:gridSpacing cx="78028800" cy="78028800"/>
+</p:viewPr>`,
+    'ppt/tableStyles.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:tblStyleLst xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" def="{5C22544A-7EE6-4342-B048-85BDC9FD1C3A}"/>`,
+    'ppt/slideMasters/slideMaster1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldMaster xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
+  <p:cSld name="Office Theme">
+    <p:bg>
+      <p:bgPr>
+        <a:solidFill><a:srgbClr val="FBFCFE"/></a:solidFill>
+        <a:effectLst/>
+      </p:bgPr>
+    </p:bg>
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="0" cy="0"/>
+          <a:chOff x="0" y="0"/>
+          <a:chExt cx="0" cy="0"/>
+        </a:xfrm>
+      </p:grpSpPr>
+    </p:spTree>
+  </p:cSld>
+  <p:clrMap bg1="lt1" tx1="dk1" bg2="lt2" tx2="dk2" accent1="accent1" accent2="accent2" accent3="accent3" accent4="accent4" accent5="accent5" accent6="accent6" hlink="hlink" folHlink="folHlink"/>
+  <p:sldLayoutIdLst>
+    <p:sldLayoutId id="1" r:id="rId1"/>
+  </p:sldLayoutIdLst>
+  <p:txStyles>
+    <p:titleStyle/>
+    <p:bodyStyle/>
+    <p:otherStyle/>
+  </p:txStyles>
+</p:sldMaster>`,
+    'ppt/slideMasters/_rels/slideMaster1.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideLayout" Target="../slideLayouts/slideLayout1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="../theme/theme1.xml"/>
+</Relationships>`,
+    'ppt/slideLayouts/slideLayout1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<p:sldLayout xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" type="blank" preserve="1">
+  <p:cSld name="Blank">
+    <p:spTree>
+      <p:nvGrpSpPr>
+        <p:cNvPr id="1" name=""/>
+        <p:cNvGrpSpPr/>
+        <p:nvPr/>
+      </p:nvGrpSpPr>
+      <p:grpSpPr>
+        <a:xfrm>
+          <a:off x="0" y="0"/>
+          <a:ext cx="0" cy="0"/>
+          <a:chOff x="0" y="0"/>
+          <a:chExt cx="0" cy="0"/>
+        </a:xfrm>
+      </p:grpSpPr>
+    </p:spTree>
+  </p:cSld>
+  <p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr>
+</p:sldLayout>`,
+    'ppt/slideLayouts/_rels/slideLayout1.xml.rels': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slideMaster" Target="../slideMasters/slideMaster1.xml"/>
+</Relationships>`,
+    'ppt/theme/theme1.xml': `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<a:theme xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" name="MeteorAPI Theme">
+  <a:themeElements>
+    <a:clrScheme name="MeteorAPI">
+      <a:dk1><a:srgbClr val="111827"/></a:dk1>
+      <a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>
+      <a:dk2><a:srgbClr val="172033"/></a:dk2>
+      <a:lt2><a:srgbClr val="F8FAFC"/></a:lt2>
+      <a:accent1><a:srgbClr val="F97316"/></a:accent1>
+      <a:accent2><a:srgbClr val="2563EB"/></a:accent2>
+      <a:accent3><a:srgbClr val="0F766E"/></a:accent3>
+      <a:accent4><a:srgbClr val="9333EA"/></a:accent4>
+      <a:accent5><a:srgbClr val="DC2626"/></a:accent5>
+      <a:accent6><a:srgbClr val="475569"/></a:accent6>
+      <a:hlink><a:srgbClr val="2563EB"/></a:hlink>
+      <a:folHlink><a:srgbClr val="7C3AED"/></a:folHlink>
+    </a:clrScheme>
+    <a:fontScheme name="MeteorAPI">
+      <a:majorFont>
+        <a:latin typeface="Aptos Display"/>
+        <a:ea typeface="Microsoft YaHei"/>
+        <a:cs typeface="Arial"/>
+      </a:majorFont>
+      <a:minorFont>
+        <a:latin typeface="Aptos"/>
+        <a:ea typeface="Microsoft YaHei"/>
+        <a:cs typeface="Arial"/>
+      </a:minorFont>
+    </a:fontScheme>
+    <a:fmtScheme name="MeteorAPI">
+      <a:fillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:fillStyleLst>
+      <a:lnStyleLst>
+        <a:ln w="9525" cap="flat" cmpd="sng" algn="ctr">
+          <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+          <a:prstDash val="solid"/>
+        </a:ln>
+      </a:lnStyleLst>
+      <a:effectStyleLst>
+        <a:effectStyle><a:effectLst/></a:effectStyle>
+      </a:effectStyleLst>
+      <a:bgFillStyleLst>
+        <a:solidFill><a:schemeClr val="phClr"/></a:solidFill>
+      </a:bgFillStyleLst>
+    </a:fmtScheme>
+  </a:themeElements>
+  <a:objectDefaults/>
+  <a:extraClrSchemeLst/>
+</a:theme>`
+  }
+}
+
+async function createPptxBuffer(userId, req, payload) {
+  const { plan, slideImages } = normalizePptExportRequest(payload)
+  const tempRoot = await mkdtemp(path.join(tmpdir(), 'playground-pptx-'))
+  const packageRoot = path.join(tempRoot, 'package')
+  const outputPath = path.join(tempRoot, 'export.pptx')
+
+  try {
+    await mkdir(path.join(packageRoot, '_rels'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'docProps'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', '_rels'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', 'slides', '_rels'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', 'slideMasters', '_rels'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', 'slideLayouts', '_rels'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', 'theme'), { recursive: true })
+    await mkdir(path.join(packageRoot, 'ppt', 'media'), { recursive: true })
+
+    const templateFiles = buildPptxTemplateFiles(plan.projectTitle, plan.slides.length)
+    const imageExtensions = new Set()
+
+    for (const [relativePath, content] of Object.entries(templateFiles)) {
+      if (content === null) {
+        continue
+      }
+      const target = path.join(packageRoot, relativePath)
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, content, 'utf8')
+    }
+
+    for (let index = 0; index < plan.slides.length; index += 1) {
+      const slide = plan.slides[index]
+      const source = slide.slideImageId ? slideImages.get(slide.slideImageId) : ''
+      let mediaFileName = ''
+      let imageRelId = ''
+
+      if (source) {
+        const image = await loadPptExportImage(userId, req, source)
+        if (image?.buffer?.length) {
+          const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
+          mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
+          imageRelId = 'rId2'
+          imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
+          await writeFile(path.join(packageRoot, 'ppt', 'media', mediaFileName), image.buffer)
+        }
+      }
+
+      await writeFile(path.join(packageRoot, 'ppt', 'slides', `slide${index + 1}.xml`), buildSlideXml(slide, imageRelId), 'utf8')
+      await writeFile(
+        path.join(packageRoot, 'ppt', 'slides', '_rels', `slide${index + 1}.xml.rels`),
+        buildSlideRelsXml(imageRelId, mediaFileName),
+        'utf8'
+      )
+    }
+
+    await writeFile(path.join(packageRoot, '[Content_Types].xml'), buildContentTypesXml(plan.slides.length, imageExtensions), 'utf8')
+    await writeFile(path.join(packageRoot, 'ppt', 'presentation.xml'), buildPresentationXml(plan.slides.length), 'utf8')
+    await writeFile(path.join(packageRoot, 'ppt', '_rels', 'presentation.xml.rels'), buildPresentationRelsXml(plan.slides.length), 'utf8')
+
+    await new Promise((resolve, reject) => {
+      execFile(
+        'zip',
+        ['-qr', outputPath, '[Content_Types].xml', '_rels', 'docProps', 'ppt'],
+        { cwd: packageRoot },
+        (error) => {
+          if (error) {
+            reject(appError(500, 'Unable to package PPTX export'))
+            return
+          }
+          resolve()
+        }
+      )
+    })
+
+    return {
+      buffer: await readFile(outputPath),
+      filename: `${(plan.projectTitle || 'ppt-export').replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'ppt-export'}.pptx`
+    }
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true })
   }
 }
 
@@ -2540,6 +3102,19 @@ const server = createServer(async (req, res) => {
       const user = await getAuthenticatedUser(req)
       const conversations = await listConversations(user.id)
       json(res, 200, { code: 0, message: 'success', data: conversations })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/ppt/export') {
+      const user = await getAuthenticatedUser(req)
+      const body = await parseJsonBody(req)
+      const exported = await createPptxBuffer(user.id, req, body)
+      res.writeHead(200, {
+        'Content-Disposition': buildAttachmentDisposition(exported.filename),
+        'Content-Length': String(exported.buffer.length),
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation'
+      })
+      res.end(exported.buffer)
       return
     }
 

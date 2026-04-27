@@ -226,3 +226,13 @@ export interface PptWorkspaceState {
   model: string
   plan: PptPlanResult | null
 }
+
+export interface PptExportSlideImage {
+  slideImageId: string
+  source: string
+}
+
+export interface PptExportRequest {
+  plan: PptPlanResult
+  slideImages: PptExportSlideImage[]
+}

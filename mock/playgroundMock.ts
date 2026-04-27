@@ -357,6 +357,11 @@ async function handleMockRequest(
     return true
   }
 
+  if (method === 'POST' && url.pathname === '/api/playground/ppt/export') {
+    requireMockAuth(req)
+    throw createMockError(501, 'Mock 模式暂不支持导出 PPTX，请切到真实后端验证。')
+  }
+
   if (method === 'POST' && url.pathname === '/api/playground/conversations') {
     requireMockAuth(req)
     const body = await readJsonBody(req)
