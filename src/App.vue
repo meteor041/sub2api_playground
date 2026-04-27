@@ -3741,7 +3741,12 @@ async function generatePptSlideImageAtIndex(slideIndex: number): Promise<Generat
 
   const { task_id } = await createImageTask(
     apiKey,
-    buildImageTaskPayload(prompt, '1536x864', [], originConversationId, 'direct')
+    {
+      ...buildImageTaskPayload(prompt, '1536x864', [], originConversationId, 'direct'),
+      ppt_context: {
+        slide_page_number: slide.pageNumber
+      }
+    }
   )
   const task = await waitForImageTask(task_id)
   if (task.status === 'failed') {

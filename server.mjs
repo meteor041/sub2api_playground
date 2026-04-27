@@ -1708,6 +1708,12 @@ function normalizeTaskPayload(payload) {
   const conversationId = typeof payload?.conversation_id === 'string' ? payload.conversation_id.trim() : ''
   const source = payload?.source === 'chat' ? 'chat' : 'direct'
   const assistantMessageId = typeof payload?.assistant_message_id === 'string' ? payload.assistant_message_id.trim() : ''
+  const rawPptContext = payload?.ppt_context && typeof payload.ppt_context === 'object' ? payload.ppt_context : null
+  const pptContext = rawPptContext && Number.isInteger(rawPptContext.slide_page_number) && rawPptContext.slide_page_number > 0
+    ? {
+      slide_page_number: rawPptContext.slide_page_number
+    }
+    : null
   const stream = payload?.stream !== false
   const partialImages = Number.isInteger(payload?.partial_images) && payload.partial_images > 0
     ? Math.min(payload.partial_images, 3)
@@ -1727,6 +1733,39 @@ function normalizeTaskPayload(payload) {
     conversation_id: conversationId || null,
     source,
     assistant_message_id: assistantMessageId || null
+    ,
+    ppt_context: pptContext
+  }
+}
+
+function mergeTaskImageIntoPptState(pptState, pptContext, image) {
+  if (!pptState || !pptContext || !Number.isInteger(pptContext.slide_page_number) || !image) {
+    return pptState || null
+  }
+  const plan = pptState.plan && typeof pptState.plan === 'object' && Array.isArray(pptState.plan.slides)
+    ? pptState.plan
+    : null
+  if (!plan) {
+    return pptState
+  }
+
+  const nextSlides = plan.slides.map((slide) => {
+    if (Number(slide?.pageNumber) !== Number(pptContext.slide_page_number)) {
+      return slide
+    }
+    return {
+      ...slide,
+      slideImageId: image.id || slide.slideImageId || '',
+      slideImageUrl: image.image_url || image.remoteUrl || image.dataUrl || slide.slideImageUrl || ''
+    }
+  })
+
+  return {
+    ...pptState,
+    plan: {
+      ...plan,
+      slides: nextSlides
+    }
   }
 }
 
@@ -1972,12 +2011,15 @@ async function archiveImageTaskToConversation(task) {
       ? firstImage.dataUrl || firstImage.image_url || firstImage.remoteUrl
       : undefined
   })
+  const nextPptState = task.status === 'completed' && taskImages.length > 0
+    ? mergeTaskImageIntoPptState(conversation.state.pptState || null, task.payload.ppt_context || null, taskImages[0])
+    : (conversation.state.pptState || null)
 
   await saveConversationState(task.userId, task.payload.conversation_id, {
     workspaceType: conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create',
     chatMessages: nextMessages,
     generatedImages: nextImages,
-    pptState: conversation.state.pptState || null
+    pptState: nextPptState
   })
   if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
     const originalResultImages = task.result.images
@@ -2001,6 +2043,20 @@ async function archiveImageTaskToConversation(task) {
           remote_url: hydratedImage?.remoteUrl || taskImage.remoteUrl || null,
           image_url: hydratedImage?.image_url || taskImage.image_url || null
         }
+      })
+    }
+    if (conversation.state.workspaceType === 'ppt' && task.payload.ppt_context) {
+      const hydratedFirstImage = hydratedConversation.state.generatedImages.find((image) => image.id === taskImages[0]?.id) || null
+      const hydratedPptState = mergeTaskImageIntoPptState(
+        hydratedConversation.state.pptState || null,
+        task.payload.ppt_context,
+        hydratedFirstImage
+      )
+      await saveConversationState(task.userId, task.payload.conversation_id, {
+        workspaceType: 'ppt',
+        chatMessages: hydratedConversation.state.chatMessages,
+        generatedImages: hydratedConversation.state.generatedImages,
+        pptState: hydratedPptState
       })
     }
   }
