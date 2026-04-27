@@ -202,6 +202,7 @@ const pptSelectedModel = ref(textModels[0])
 const pptPlan = ref<PptPlanResult | null>(null)
 const pptCurrentSlideIndex = ref(0)
 const pptSlideEditPrompt = ref('')
+const pptSidebarTab = ref<'settings' | 'tasks'>('settings')
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -4384,10 +4385,34 @@ onBeforeUnmount(() => {
 
         <aside class="ppt-sidebar panel">
           <div class="ppt-sidebar-header">
-            <p class="eyebrow">Planner</p>
-            <h2>生成参数</h2>
+            <div>
+              <p class="eyebrow">Planner</p>
+              <h2>{{ pptSidebarTab === 'settings' ? '生成参数' : '任务记录' }}</h2>
+            </div>
+            <div class="ppt-sidebar-tabs" role="tablist" aria-label="PPT 侧栏">
+              <button
+                class="ppt-sidebar-tab"
+                :class="{ active: pptSidebarTab === 'settings' }"
+                type="button"
+                role="tab"
+                :aria-selected="pptSidebarTab === 'settings'"
+                @click="pptSidebarTab = 'settings'"
+              >
+                参数
+              </button>
+              <button
+                class="ppt-sidebar-tab"
+                :class="{ active: pptSidebarTab === 'tasks' }"
+                type="button"
+                role="tab"
+                :aria-selected="pptSidebarTab === 'tasks'"
+                @click="pptSidebarTab = 'tasks'"
+              >
+                任务
+              </button>
+            </div>
           </div>
-          <form class="ppt-form" @submit.prevent="handleGeneratePptPlan">
+          <form v-if="pptSidebarTab === 'settings'" class="ppt-form" @submit.prevent="handleGeneratePptPlan">
             <label>
               模型
               <select v-model="pptSelectedModel">
@@ -4438,7 +4463,7 @@ onBeforeUnmount(() => {
             </button>
           </form>
 
-          <div v-if="pptPlan && currentPptSlide" class="ppt-slide-editor">
+          <div v-if="pptSidebarTab === 'settings' && pptPlan && currentPptSlide" class="ppt-slide-editor">
             <label>
               当前页编辑指令
               <textarea
@@ -4482,7 +4507,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div class="ppt-task-records">
+          <div v-if="pptSidebarTab === 'tasks'" class="ppt-task-records">
             <div class="ppt-task-records-header">
               <span class="ppt-slide-label">任务记录</span>
               <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewPptTask">
@@ -4506,7 +4531,7 @@ onBeforeUnmount(() => {
             </div>
           </div>
 
-          <div v-if="pptPlan" class="ppt-plan-summary">
+          <div v-if="pptSidebarTab === 'settings' && pptPlan" class="ppt-plan-summary">
             <section>
               <span class="ppt-slide-label">整套摘要</span>
               <p>{{ pptPlan.summary }}</p>

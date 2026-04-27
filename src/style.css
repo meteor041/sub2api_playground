@@ -756,6 +756,28 @@ h2 {
   padding: 22px;
 }
 
+.ppt-sidebar-tabs {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--secondary-bg);
+}
+
+.ppt-sidebar-tab {
+  min-width: 68px;
+  padding: 0.58rem 0.9rem;
+  color: var(--ink);
+  background: transparent;
+  box-shadow: none;
+}
+
+.ppt-sidebar-tab.active {
+  color: var(--ink-contrast);
+  background: var(--ink);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.14);
+}
+
 .ppt-form,
 .ppt-plan-summary,
 .ppt-slide-editor {
