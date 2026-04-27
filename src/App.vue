@@ -4372,8 +4372,17 @@ onBeforeUnmount(() => {
                 <span>✨</span>
                 {{ pptBusy ? '生成中...' : '生成' }}
               </button>
-              <button class="ghost mini" type="button" :disabled="!pptPlan" @click="handleExportPptPresentation">
-                导出
+              <button
+                class="ghost mini icon-button"
+                type="button"
+                :disabled="!pptPlan"
+                aria-label="导出 PPTX"
+                title="导出 PPTX"
+                @click="handleExportPptPresentation"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M12 3v10m0 0 4-4m-4 4-4-4M5 17v2a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-2" />
+                </svg>
               </button>
               <button
                 class="ghost mini icon-button"
