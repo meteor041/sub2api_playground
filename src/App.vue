@@ -2907,22 +2907,28 @@ onBeforeUnmount(() => {
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
           </svg>
-          <span v-if="!mainSidebarCollapsed">画廊</span>
-          <small v-if="!mainSidebarCollapsed">Public gallery</small>
+          <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
+            <span>画廊</span>
+            <small>Public gallery</small>
+          </div>
         </button>
         <button :class="{ active: activeView === 'library' }" type="button" title="作品库" @click="activeView = 'library'">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M4 19.5V6a2 2 0 0 1 2-2h5l2 2h5a2 2 0 0 1 2 2v11.5M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
           </svg>
-          <span v-if="!mainSidebarCollapsed">作品库</span>
-          <small v-if="!mainSidebarCollapsed">Personal library</small>
+          <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
+            <span>作品库</span>
+            <small>Personal library</small>
+          </div>
         </button>
         <button :class="{ active: activeView === 'create' }" type="button" title="创造" @click="activeView = 'create'">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M12 20h9M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/>
           </svg>
-          <span v-if="!mainSidebarCollapsed">创造</span>
-          <small v-if="!mainSidebarCollapsed">Chat & create</small>
+          <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
+            <span>创造</span>
+            <small>Chat & create</small>
+          </div>
         </button>
       </nav>
 

@@ -337,8 +337,9 @@ h2 {
 
 .side-nav button,
 .session-item {
-  display: grid;
-  gap: 2px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   border-radius: 16px;
   padding: 10px 12px;
@@ -355,6 +356,7 @@ h2 {
 }
 
 .side-nav button svg {
+  flex: 0 0 auto;
   width: 18px;
   height: 18px;
   fill: none;
@@ -362,6 +364,11 @@ h2 {
   stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.side-nav-copy {
+  display: grid;
+  gap: 2px;
 }
 
 .side-nav button.active,
