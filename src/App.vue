@@ -3772,7 +3772,11 @@ async function handleSaveCurrentPptSlide(options: { silent?: boolean } = {}): Pr
   }
 }
 
-async function generatePptSlideImageAtIndex(slideIndex: number): Promise<GeneratedImage> {
+async function generatePptSlideImageAtIndex(
+  slideIndex: number,
+  options: { persist?: boolean } = {}
+): Promise<GeneratedImage> {
+  const shouldPersist = options.persist !== false
   const apiKey = selectedKeySecret.value
   const slide = pptPlan.value?.slides[slideIndex]
   const prompt = slide?.generationPrompt.trim() || ''
@@ -3831,7 +3835,9 @@ async function generatePptSlideImageAtIndex(slideIndex: number): Promise<Generat
     slides: normalizePptSlides(slides)
   } : null
   generatedImages.value = nextGeneratedImages
-  await persistPptConversationState()
+  if (shouldPersist) {
+    await persistPptConversationState()
+  }
   return nextImage
 }
 
@@ -3882,19 +3888,25 @@ async function handleGenerateAllPptSlideImages(): Promise<void> {
     const concurrency = Math.min(pptImageGenerationConcurrency, total)
     let nextIndex = 0
     let completed = 0
+    let failed = false
 
     const worker = async (): Promise<void> => {
-      while (nextIndex < total) {
+      while (!failed && nextIndex < total) {
         const slideIndex = nextIndex
         nextIndex += 1
-        pptCurrentSlideIndex.value = slideIndex
         pptTaskLabel.value = `正在生成第 ${Math.min(completed + 1, total)} / ${total} 页图片...`
-        await generatePptSlideImageAtIndex(slideIndex)
+        try {
+          await generatePptSlideImageAtIndex(slideIndex, { persist: false })
+        } catch (error) {
+          failed = true
+          throw error
+        }
         completed += 1
       }
     }
 
     await Promise.all(Array.from({ length: concurrency }, () => worker()))
+    await persistPptConversationState()
     await refreshBalanceOnly()
     setSuccess('整套 PPT 图片已生成。')
   } catch (error) {
