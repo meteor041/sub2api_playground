@@ -205,9 +205,17 @@ const pptSelectedModel = ref(textModels[0])
 const pptPlan = ref<PptPlanResult | null>(null)
 const pptCurrentSlideIndex = ref(0)
 const pptSlideEditPrompt = ref('')
+const pptFormTitle = ref('')
+const pptFormObjective = ref('')
+const pptFormKeyPoints = ref('')
+const pptFormLayout = ref('')
+const pptFormVisualDirection = ref('')
+const pptFormSpeakerNotes = ref('')
+const pptFormGenerationPrompt = ref('')
 const pptSidebarTab = ref<'settings' | 'tasks'>('settings')
 const pptConfigPanelOpen = ref(false)
 const pptEditorOpen = ref(false)
+const pptPresentOpen = ref(false)
 const pptImageGenerationConcurrency = 5
 
 const imagePrompt = ref('')
@@ -1364,13 +1372,35 @@ function selectPptSlide(index: number): void {
   pptCurrentSlideIndex.value = index
 }
 
+function syncPptSlideForm(slide: PptSlidePlan | null): void {
+  pptFormTitle.value = slide?.title || ''
+  pptFormObjective.value = slide?.objective || ''
+  pptFormKeyPoints.value = slide?.keyPoints.join('\n') || ''
+  pptFormLayout.value = slide?.layout || ''
+  pptFormVisualDirection.value = slide?.visualDirection || ''
+  pptFormSpeakerNotes.value = slide?.speakerNotes || ''
+  pptFormGenerationPrompt.value = slide?.generationPrompt || ''
+}
+
 function openPptSlideEditor(index: number): void {
   selectPptSlide(index)
+  syncPptSlideForm(pptSlides.value[index] || null)
   pptEditorOpen.value = true
 }
 
 function closePptSlideEditor(): void {
   pptEditorOpen.value = false
+}
+
+function openPptPresentation(): void {
+  if (!pptPlan.value || pptSlides.value.length === 0) {
+    return
+  }
+  pptPresentOpen.value = true
+}
+
+function closePptPresentation(): void {
+  pptPresentOpen.value = false
 }
 
 async function copyText(value: string, successText: string): Promise<void> {
@@ -3481,6 +3511,55 @@ async function handleDuplicatePptSlideAt(index: number): Promise<void> {
   setSuccess('当前页已复制。')
 }
 
+async function handleSaveCurrentPptSlide(): Promise<void> {
+  if (!pptPlan.value || !currentPptSlide.value) {
+    setError('当前没有可保存的页面。')
+    return
+  }
+
+  const title = pptFormTitle.value.trim()
+  const objective = pptFormObjective.value.trim()
+  const layout = pptFormLayout.value.trim()
+  const visualDirection = pptFormVisualDirection.value.trim()
+  const speakerNotes = pptFormSpeakerNotes.value.trim()
+  const generationPrompt = pptFormGenerationPrompt.value.trim()
+  const keyPoints = pptFormKeyPoints.value
+    .split(/\n+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6)
+
+  if (!title || !objective || keyPoints.length === 0 || !layout || !visualDirection || !speakerNotes || !generationPrompt) {
+    setError('请先补全当前页的标题、目标、要点、版式、视觉方向、讲述建议和制作 Prompt。')
+    return
+  }
+
+  const slides = [...pptPlan.value.slides]
+  const current = slides[pptCurrentSlideIndex.value]
+  if (!current) {
+    setError('当前页已丢失，请刷新后重试。')
+    return
+  }
+
+  slides.splice(pptCurrentSlideIndex.value, 1, normalizePptSlide({
+    ...current,
+    title,
+    objective,
+    keyPoints,
+    layout,
+    visualDirection,
+    speakerNotes,
+    generationPrompt
+  }, current.pageNumber))
+
+  pptPlan.value = {
+    ...pptPlan.value,
+    slides: normalizePptSlides(slides)
+  }
+  await persistPptConversationState()
+  setSuccess('当前页内容已保存。')
+}
+
 async function generatePptSlideImageAtIndex(slideIndex: number): Promise<GeneratedImage> {
   const apiKey = selectedKeySecret.value
   const slide = pptPlan.value?.slides[slideIndex]
@@ -3864,10 +3943,14 @@ watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
 watch(() => pptSlides.value.length, (length) => {
   if (length <= 0) {
     pptCurrentSlideIndex.value = 0
+    syncPptSlideForm(null)
     return
   }
   pptCurrentSlideIndex.value = Math.min(pptCurrentSlideIndex.value, length - 1)
 })
+watch(currentPptSlide, (slide) => {
+  syncPptSlideForm(slide)
+}, { immediate: true })
 watch([pptPrompt, pptStyle, pptDesignDetails, pptPageCount, pptSelectedModel, pptPlan], () => {
   persistPptDraft()
 }, { deep: true })
@@ -4401,6 +4484,9 @@ onBeforeUnmount(() => {
                 <span>✨</span>
                 {{ pptBusy ? '生成中...' : '生成' }}
               </button>
+              <button class="ghost mini" type="button" :disabled="!pptPlan" @click="openPptPresentation">
+                ▶ 演示
+              </button>
               <button
                 class="ghost mini icon-button"
                 type="button"
@@ -4440,48 +4526,61 @@ onBeforeUnmount(() => {
               </article>
             </div>
 
-            <div v-else-if="pptSlides.length > 0" class="ppt-deck">
-              <div class="ppt-deck-track">
-                <article
-                  v-for="(slide, index) in pptSlides"
-                  :key="slide.pageNumber"
-                  class="ppt-deck-card"
-                  :class="{ active: index === pptCurrentSlideIndex }"
-                  @click="openPptSlideEditor(index)"
-                >
-                  <div class="ppt-deck-card-media">
-                    <img
-                      v-if="imageForPptSlide(slide)"
-                      :src="previewUrlForPptSlide(slide)"
-                      :alt="slide.title"
-                    />
-                    <div v-else class="ppt-deck-card-placeholder">
-                      <span>{{ String(index + 1).padStart(2, '0') }}</span>
-                    </div>
-                    <div class="ppt-deck-card-actions">
-                      <button class="ghost mini" type="button" :disabled="pptBusy || pptSlides.length <= 1" @click.stop="handleDeletePptSlideAt(index)">
-                        删除
-                      </button>
-                      <button class="ghost mini" type="button" :disabled="pptBusy || index <= 0" @click.stop="handleMovePptSlideAt(index, -1)">
-                        上移
-                      </button>
-                      <button class="ghost mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click.stop="handleDuplicatePptSlideAt(index)">
-                        复制
-                      </button>
-                    </div>
+            <div v-else-if="pptSlides.length > 0" class="ppt-overview-grid">
+              <article
+                v-for="(slide, index) in pptSlides"
+                :key="slide.pageNumber"
+                class="ppt-overview-card"
+                :class="{ active: index === pptCurrentSlideIndex }"
+                @click="openPptSlideEditor(index)"
+              >
+                <span class="ppt-overview-card-page">{{ String(index + 1).padStart(2, '0') }}</span>
+                <div class="ppt-overview-card-media">
+                  <img
+                    v-if="imageForPptSlide(slide)"
+                    :src="previewUrlForPptSlide(slide)"
+                    :alt="slide.title"
+                  />
+                  <div v-else class="ppt-overview-card-placeholder">
+                    <span>{{ index % 3 === 0 ? '📊' : index % 3 === 1 ? '💡' : '📈' }}</span>
                   </div>
-                  <div class="ppt-deck-card-body">
-                    <span class="ppt-slide-index">第 {{ index + 1 }} 页</span>
-                    <strong>{{ slide.title }}</strong>
-                    <p>{{ slide.objective }}</p>
-                  </div>
-                </article>
-              </div>
+                </div>
+                <div class="ppt-overview-card-body">
+                  <strong>{{ slide.title }}</strong>
+                  <p>{{ slide.objective }}</p>
+                </div>
+                <div class="ppt-deck-card-actions">
+                  <button class="ghost mini" type="button" :disabled="pptBusy || pptSlides.length <= 1" @click.stop="handleDeletePptSlideAt(index)">
+                    删除
+                  </button>
+                  <button class="ghost mini" type="button" :disabled="pptBusy || index <= 0" @click.stop="handleMovePptSlideAt(index, -1)">
+                    上移
+                  </button>
+                  <button class="ghost mini" type="button" :disabled="pptBusy || pptSlides.length >= 30" @click.stop="handleDuplicatePptSlideAt(index)">
+                    复制
+                  </button>
+                </div>
+              </article>
             </div>
 
             <div v-else class="ppt-empty-state ppt-empty-stage">
-              <strong>以结果为中心开始制作</strong>
-              <span>打开右侧设置，输入内容和风格后生成整套分页。页面会以横向大卡片形式呈现，再进入单页编辑。</span>
+              <strong>输入你的想法，生成一套 PPT 大纲</strong>
+              <div class="ppt-empty-composer">
+                <textarea
+                  v-model="pptPrompt"
+                  rows="4"
+                  placeholder="例如：为 AI 图像生成 SaaS 做一套融资路演大纲，包含市场、产品、增长和商业模式。"
+                />
+                <div class="ppt-empty-actions">
+                  <button class="primary" type="button" :disabled="pptBusy || !selectedKeySecret" @click="handleGeneratePptPlan">
+                    <span>✨</span>
+                    {{ pptBusy ? '生成中...' : '生成' }}
+                  </button>
+                  <button class="ghost mini" type="button" @click="pptConfigPanelOpen = true">
+                    设置
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         </section>
@@ -4490,7 +4589,7 @@ onBeforeUnmount(() => {
         <section v-if="pptEditorOpen && currentPptSlide" class="ppt-editor-modal panel" aria-label="PPT 页面编辑详情">
           <div class="ppt-editor-topbar">
             <button class="ghost mini" type="button" @click="closePptSlideEditor">
-              返回卡片
+              返回概览
             </button>
             <div class="ppt-editor-topbar-actions">
               <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
@@ -4501,14 +4600,27 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </div>
-          <article class="ppt-editor-sheet">
-            <header class="ppt-slide-header">
-              <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
-              <strong>{{ currentPptSlide.title }}</strong>
-              <p>{{ currentPptSlide.objective }}</p>
-            </header>
-            <div class="ppt-editor-sheet-body">
-              <div class="ppt-slide-column ppt-slide-column-main">
+          <div class="ppt-focus-layout">
+            <aside class="ppt-focus-strip">
+              <button
+                v-for="(slide, index) in pptSlides"
+                :key="`focus-${slide.pageNumber}`"
+                class="ppt-focus-thumb"
+                :class="{ active: index === pptCurrentSlideIndex }"
+                type="button"
+                @click="selectPptSlide(index)"
+              >
+                <span>{{ String(index + 1).padStart(2, '0') }}</span>
+                <strong>{{ slide.title }}</strong>
+              </button>
+            </aside>
+            <article class="ppt-focus-canvas">
+              <header class="ppt-slide-header">
+                <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+                <strong>{{ currentPptSlide.title }}</strong>
+                <p>{{ currentPptSlide.objective }}</p>
+              </header>
+              <div class="ppt-focus-canvas-body">
                 <section class="ppt-slide-points">
                   <span class="ppt-slide-label">核心内容</span>
                   <ul>
@@ -4529,37 +4641,99 @@ onBeforeUnmount(() => {
                   <span class="ppt-slide-label">讲述建议</span>
                   <p>{{ currentPptSlide.speakerNotes }}</p>
                 </section>
-                <section class="ppt-slide-prompt">
-                  <span class="ppt-slide-label">当前页编辑指令</span>
-                  <textarea
-                    v-model="pptSlideEditPrompt"
-                    rows="5"
-                    placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+              </div>
+            </article>
+            <aside class="ppt-focus-editor">
+              <section class="ppt-slide-form-card">
+                <div class="ppt-slide-form-header">
+                  <span class="ppt-slide-label">当前页编辑</span>
+                  <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleSaveCurrentPptSlide">
+                    保存
+                  </button>
+                </div>
+                <label class="ppt-slide-field">
+                  <span>标题</span>
+                  <input v-model="pptFormTitle" type="text" placeholder="当前页标题" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>页面目标</span>
+                  <textarea v-model="pptFormObjective" rows="3" placeholder="这页要讲清什么" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>核心要点</span>
+                  <textarea v-model="pptFormKeyPoints" rows="5" placeholder="每行一个要点" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>版式</span>
+                  <textarea v-model="pptFormLayout" rows="3" placeholder="推荐版式与信息布局" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>视觉方向</span>
+                  <textarea v-model="pptFormVisualDirection" rows="3" placeholder="色彩、质感、图形风格" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>讲述建议</span>
+                  <textarea v-model="pptFormSpeakerNotes" rows="3" placeholder="演示时怎么讲" />
+                </label>
+                <label class="ppt-slide-field">
+                  <span>制作 Prompt</span>
+                  <textarea v-model="pptFormGenerationPrompt" rows="6" placeholder="该页的详细制作提示词" />
+                </label>
+              </section>
+              <section class="ppt-slide-image-panel">
+                <span class="ppt-slide-label">本页配图</span>
+                <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
+                  <img
+                    :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                    :alt="currentPptSlide.title"
+                    loading="lazy"
+                    @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                    @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
                   />
-                </section>
-              </div>
-              <div class="ppt-slide-column ppt-slide-column-side">
-                <section class="ppt-slide-image-panel">
-                  <span class="ppt-slide-label">本页配图</span>
-                  <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
-                    <img
-                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
-                      :alt="currentPptSlide.title"
-                      loading="lazy"
-                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                      @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
-                    />
-                  </div>
-                  <div v-else class="ppt-slide-image-empty">
-                    <span>当前页还没有生成配图。</span>
-                  </div>
-                </section>
-                <section class="ppt-slide-prompt">
-                  <span class="ppt-slide-label">本页制作 Prompt</span>
-                  <p>{{ currentPptSlide.generationPrompt }}</p>
-                </section>
-              </div>
+                </div>
+                <div v-else class="ppt-slide-image-empty">
+                  <span>当前页还没有生成配图。</span>
+                </div>
+              </section>
+              <section class="ppt-slide-prompt">
+                <span class="ppt-slide-label">当前页编辑指令</span>
+                <textarea
+                  v-model="pptSlideEditPrompt"
+                  rows="5"
+                  placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+                />
+              </section>
+            </aside>
+          </div>
+        </section>
+
+        <div v-if="pptPresentOpen && currentPptSlide" class="ppt-editor-modal-backdrop" @click="closePptPresentation"></div>
+        <section v-if="pptPresentOpen && currentPptSlide" class="ppt-present-modal panel" aria-label="PPT 演示模式">
+          <div class="ppt-editor-topbar">
+            <button class="ghost mini" type="button" @click="closePptPresentation">
+              退出演示
+            </button>
+            <div class="ppt-editor-topbar-actions">
+              <button class="ghost mini" type="button" :disabled="pptSlides.length < 2" @click="navigatePptSlide(-1)">
+                上一页
+              </button>
+              <button class="ghost mini" type="button" :disabled="pptSlides.length < 2" @click="navigatePptSlide(1)">
+                下一页
+              </button>
             </div>
+          </div>
+          <article class="ppt-present-sheet">
+            <header class="ppt-slide-header">
+              <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+              <strong>{{ currentPptSlide.title }}</strong>
+              <p>{{ currentPptSlide.objective }}</p>
+            </header>
+            <section class="ppt-slide-points">
+              <span class="ppt-slide-label">核心内容</span>
+              <ul>
+                <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`present-${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+              </ul>
+            </section>
           </article>
         </section>
 

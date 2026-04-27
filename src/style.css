@@ -658,21 +658,30 @@ h2 {
 .ppt-skeleton-row,
 .ppt-deck-track {
   display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(360px, 420px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding-bottom: 8px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.ppt-overview-grid {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  overflow-y: auto;
+  padding-right: 4px;
   scrollbar-width: thin;
 }
 
 .ppt-skeleton-card,
-.ppt-deck-card {
+.ppt-deck-card,
+.ppt-overview-card {
   display: grid;
   align-content: start;
-  gap: 16px;
-  min-height: 480px;
+  gap: 14px;
+  min-height: 340px;
   border-radius: 18px;
   padding: 18px;
   border: 1px solid rgba(17, 24, 39, 0.08);
@@ -681,37 +690,47 @@ h2 {
 }
 
 :root[data-theme="dark"] .ppt-skeleton-card,
-:root[data-theme="dark"] .ppt-deck-card {
+:root[data-theme="dark"] .ppt-deck-card,
+:root[data-theme="dark"] .ppt-overview-card {
   background: rgba(24, 32, 49, 0.92);
   border-color: rgba(226, 232, 240, 0.08);
 }
 
-.ppt-deck-card {
+.ppt-deck-card,
+.ppt-overview-card {
   cursor: pointer;
   box-shadow: 0 16px 40px rgba(15, 23, 42, 0.06);
 }
 
-.ppt-deck-card:hover {
-  transform: translateY(-4px);
+.ppt-deck-card:hover,
+.ppt-overview-card:hover {
+  transform: translateY(-4px) scale(1.02);
   box-shadow: 0 26px 60px rgba(15, 23, 42, 0.12);
 }
 
-.ppt-deck-card.active {
+.ppt-overview-card:not(.active) {
+  opacity: 0.82;
+}
+
+.ppt-deck-card.active,
+.ppt-overview-card.active {
   background: rgba(255, 255, 255, 0.96);
   border-color: rgba(255, 79, 46, 0.18);
   box-shadow: 0 28px 70px rgba(15, 23, 42, 0.14);
 }
 
-:root[data-theme="dark"] .ppt-deck-card.active {
+:root[data-theme="dark"] .ppt-deck-card.active,
+:root[data-theme="dark"] .ppt-overview-card.active {
   background: rgba(17, 24, 39, 0.98);
 }
 
-.ppt-deck-card-media {
+.ppt-deck-card-media,
+.ppt-overview-card-media {
   position: relative;
   overflow: hidden;
   border-radius: 16px;
-  aspect-ratio: 16 / 10;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(228, 232, 238, 0.95));
+  aspect-ratio: 16 / 9;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(228, 232, 238, 0.85));
 }
 
 .ppt-deck-card-media img,
@@ -722,15 +741,14 @@ h2 {
   display: block;
 }
 
-.ppt-deck-card-placeholder {
+.ppt-deck-card-placeholder,
+.ppt-overview-card-placeholder {
   display: grid;
   place-items: center;
   width: 100%;
   height: 100%;
   color: var(--muted);
-  font-size: 3rem;
-  font-weight: 800;
-  letter-spacing: -0.08em;
+  font-size: 2rem;
 }
 
 .ppt-deck-card-actions {
@@ -749,16 +767,44 @@ h2 {
   transform: translateY(0);
 }
 
+.ppt-overview-card:hover .ppt-deck-card-actions,
+.ppt-overview-card.active .ppt-deck-card-actions {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .ppt-deck-card-actions .ghost {
   backdrop-filter: blur(14px);
   background: rgba(255, 255, 255, 0.78);
 }
 
 .ppt-deck-card-body,
+.ppt-overview-card-body,
 .ppt-slide-header {
   display: grid;
   gap: 10px;
   min-width: 0;
+}
+
+.ppt-overview-card {
+  position: relative;
+}
+
+.ppt-overview-card-page {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1;
+  min-width: 34px;
+  padding: 0.22rem 0.5rem;
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(12px);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
 }
 
 .ppt-slide-index,
@@ -771,6 +817,7 @@ h2 {
 }
 
 .ppt-deck-card-body strong,
+.ppt-overview-card-body strong,
 .ppt-slide-header strong {
   font-size: clamp(1.32rem, 2vw, 2.6rem);
   line-height: 1.06;
@@ -778,6 +825,7 @@ h2 {
 }
 
 .ppt-deck-card-body p,
+.ppt-overview-card-body p,
 .ppt-slide-header p,
 .ppt-slide-grid p,
 .ppt-slide-notes p,
@@ -798,6 +846,28 @@ h2 {
   background: linear-gradient(90deg, rgba(226, 232, 240, 0.65), rgba(255, 255, 255, 0.95), rgba(226, 232, 240, 0.65));
   background-size: 220% 100%;
   animation: ppt-skeleton 1.2s ease-in-out infinite;
+}
+
+.ppt-empty-composer {
+  display: grid;
+  gap: 14px;
+  width: min(680px, 100%);
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(17, 24, 39, 0.08);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(18px);
+}
+
+.ppt-empty-composer textarea {
+  min-height: 0;
+  border-radius: 16px;
+}
+
+.ppt-empty-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: center;
 }
 
 .ppt-skeleton-badge {
@@ -845,7 +915,57 @@ h2 {
   overflow: hidden;
 }
 
-.ppt-editor-sheet {
+.ppt-focus-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr) 340px;
+  gap: 16px;
+}
+
+.ppt-focus-strip,
+.ppt-focus-editor {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  overflow: auto;
+  padding-right: 4px;
+  scrollbar-width: thin;
+}
+
+.ppt-focus-thumb {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  padding: 12px;
+  border-radius: 14px;
+  color: var(--ink);
+  background: rgba(239, 241, 245, 0.8);
+  box-shadow: none;
+  outline: 1px solid rgba(17, 24, 39, 0.08);
+  text-align: left;
+}
+
+.ppt-focus-thumb span {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.ppt-focus-thumb strong {
+  line-height: 1.4;
+}
+
+.ppt-focus-thumb.active {
+  color: var(--accent);
+  background: rgba(255, 79, 46, 0.08);
+  outline-color: rgba(255, 79, 46, 0.22);
+  box-shadow: 0 16px 36px rgba(255, 79, 46, 0.12);
+}
+
+.ppt-focus-canvas,
+.ppt-present-sheet {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 18px;
@@ -858,17 +978,31 @@ h2 {
   backdrop-filter: blur(18px);
 }
 
-:root[data-theme="dark"] .ppt-editor-sheet {
+:root[data-theme="dark"] .ppt-focus-canvas,
+:root[data-theme="dark"] .ppt-present-sheet,
+:root[data-theme="dark"] .ppt-focus-thumb {
   background: rgba(17, 24, 39, 0.88);
   border-color: rgba(226, 232, 240, 0.08);
 }
 
+.ppt-focus-canvas-body,
 .ppt-editor-sheet-body,
 .ppt-slide-body {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
   gap: 16px;
   min-height: 0;
+}
+
+.ppt-present-modal {
+  position: absolute;
+  inset: 24px;
+  z-index: 14;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 16px;
+  padding: 22px;
+  border-radius: 24px;
+  overflow: hidden;
 }
 
 .ppt-slide-column {
@@ -891,6 +1025,7 @@ h2 {
 .ppt-slide-points,
 .ppt-slide-notes,
 .ppt-slide-prompt,
+.ppt-slide-form-card,
 .ppt-slide-image-panel,
 .ppt-plan-summary section,
 .ppt-form-group,
@@ -910,6 +1045,7 @@ h2 {
 :root[data-theme="dark"] .ppt-slide-points,
 :root[data-theme="dark"] .ppt-slide-notes,
 :root[data-theme="dark"] .ppt-slide-prompt,
+:root[data-theme="dark"] .ppt-slide-form-card,
 :root[data-theme="dark"] .ppt-slide-image-panel,
 :root[data-theme="dark"] .ppt-plan-summary section,
 :root[data-theme="dark"] .ppt-form-group,
@@ -925,6 +1061,30 @@ h2 {
   padding-left: 1.1rem;
   color: var(--ink);
   line-height: 1.6;
+}
+
+.ppt-slide-form-card,
+.ppt-slide-field {
+  display: grid;
+  gap: 10px;
+}
+
+.ppt-slide-form-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ppt-slide-field span {
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.ppt-slide-field input,
+.ppt-slide-field textarea {
+  width: 100%;
 }
 
 .ppt-slide-image-wrap {
@@ -2703,10 +2863,12 @@ h2 {
   }
 
   .ppt-skeleton-row,
-  .ppt-deck-track {
-    grid-auto-columns: minmax(320px, 360px);
+  .ppt-deck-track,
+  .ppt-overview-grid {
+    grid-template-columns: 1fr;
   }
 
+  .ppt-focus-layout,
   .ppt-editor-sheet-body,
   .ppt-slide-body {
     grid-template-columns: minmax(0, 1fr);
@@ -2789,11 +2951,18 @@ h2 {
   }
 
   .ppt-skeleton-row,
-  .ppt-deck-track {
-    grid-auto-columns: minmax(280px, 84vw);
+  .ppt-deck-track,
+  .ppt-overview-grid {
+    grid-template-columns: 1fr;
   }
 
   .ppt-editor-modal {
+    inset: 12px;
+    padding: 16px;
+    border-radius: 20px;
+  }
+
+  .ppt-present-modal {
     inset: 12px;
     padding: 16px;
     border-radius: 20px;
