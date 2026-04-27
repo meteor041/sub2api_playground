@@ -48,6 +48,7 @@ interface MockConversation {
   state: {
     chatMessages: JsonRecord[]
     generatedImages: JsonRecord[]
+    pptState?: JsonRecord | null
   }
 }
 
@@ -381,7 +382,10 @@ async function handleMockRequest(
     const conversation = getConversationOrThrow(conversationId)
     conversation.state = {
       chatMessages: Array.isArray(body.chatMessages) ? body.chatMessages as JsonRecord[] : [],
-      generatedImages: Array.isArray(body.generatedImages) ? body.generatedImages as JsonRecord[] : []
+      generatedImages: Array.isArray(body.generatedImages) ? body.generatedImages as JsonRecord[] : [],
+      pptState: body.pptState && typeof body.pptState === 'object' && !Array.isArray(body.pptState)
+        ? body.pptState as JsonRecord
+        : null
     }
     upsertMockLibraryFromConversation(conversation)
     touchConversation(conversation)
@@ -551,7 +555,8 @@ function createMockConversation(requestedTitle = ''): MockConversation {
     lastMessageAt: null,
     state: {
       chatMessages: [],
-      generatedImages: []
+      generatedImages: [],
+      pptState: null
     }
   }
 }

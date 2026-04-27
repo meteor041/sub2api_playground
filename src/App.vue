@@ -36,6 +36,7 @@ import type {
   LibraryItem,
   PptPlanResult,
   PptSlidePlan,
+  PptWorkspaceState,
   UserProfile
 } from './types'
 
@@ -411,14 +412,7 @@ interface StandalonePreviewImage {
   eyebrow?: string
 }
 
-interface PptDraftSnapshot {
-  prompt: string
-  style: string
-  designDetails: string
-  pageCount: number
-  model: string
-  plan: PptPlanResult | null
-}
+type PptDraftSnapshot = PptWorkspaceState
 
 function uid(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
@@ -1166,6 +1160,31 @@ function normalizePptPlan(plan: Partial<PptPlanResult>): PptPlanResult {
   }
 }
 
+function currentPptWorkspaceState(): PptWorkspaceState {
+  return {
+    prompt: pptPrompt.value,
+    style: pptStyle.value,
+    designDetails: pptDesignDetails.value,
+    pageCount: Math.min(Math.max(Number(pptPageCount.value) || 0, 1), 30),
+    model: pptSelectedModel.value,
+    plan: pptPlan.value ? normalizePptPlan(pptPlan.value) : null
+  }
+}
+
+function applyPptWorkspaceState(state?: Partial<PptWorkspaceState> | null): void {
+  pptPrompt.value = typeof state?.prompt === 'string' ? state.prompt : ''
+  pptStyle.value = typeof state?.style === 'string' ? state.style : ''
+  pptDesignDetails.value = typeof state?.designDetails === 'string' ? state.designDetails : ''
+  pptPageCount.value = Number.isFinite(Number(state?.pageCount))
+    ? Math.min(Math.max(Number(state?.pageCount), 1), 30)
+    : 8
+  pptSelectedModel.value = typeof state?.model === 'string' && textModels.includes(state.model)
+    ? state.model
+    : textModels[0]
+  pptPlan.value = state?.plan ? normalizePptPlan(state.plan) : null
+  pptCurrentSlideIndex.value = 0
+}
+
 function buildMockPptPlan(prompt: string, style: string, details: string, pageCount: number): PptPlanResult {
   const visualSystem = style || '现代商务风，信息层级清晰，深浅对比明确'
   const summary = details || '每页只讲一个重点，标题直接，适合口头演示'
@@ -1216,14 +1235,7 @@ function buildMockPptPlan(prompt: string, style: string, details: string, pageCo
 }
 
 function persistPptDraft(): void {
-  const snapshot: PptDraftSnapshot = {
-    prompt: pptPrompt.value,
-    style: pptStyle.value,
-    designDetails: pptDesignDetails.value,
-    pageCount: pptPageCount.value,
-    model: pptSelectedModel.value,
-    plan: pptPlan.value
-  }
+  const snapshot: PptDraftSnapshot = currentPptWorkspaceState()
   localStorage.setItem(PPT_DRAFT_KEY, JSON.stringify(snapshot))
 }
 
@@ -1233,17 +1245,7 @@ function restorePptDraft(): void {
     if (!parsed || typeof parsed !== 'object') {
       return
     }
-    pptPrompt.value = typeof parsed.prompt === 'string' ? parsed.prompt : ''
-    pptStyle.value = typeof parsed.style === 'string' ? parsed.style : ''
-    pptDesignDetails.value = typeof parsed.designDetails === 'string' ? parsed.designDetails : ''
-    pptPageCount.value = Number.isFinite(Number(parsed.pageCount))
-      ? Math.min(Math.max(Number(parsed.pageCount), 1), 30)
-      : 8
-    pptSelectedModel.value = typeof parsed.model === 'string' && textModels.includes(parsed.model)
-      ? parsed.model
-      : textModels[0]
-    pptPlan.value = parsed.plan ? normalizePptPlan(parsed.plan) : null
-    pptCurrentSlideIndex.value = 0
+    applyPptWorkspaceState(parsed)
   } catch {
     // Ignore malformed local state.
   }
@@ -1353,6 +1355,7 @@ function resetConversationState(): void {
   persistActiveConversationId('')
   chatMessages.value = []
   generatedImages.value = []
+  applyPptWorkspaceState(null)
   selectedImageKey.value = ''
   sharedImageKeys.value = []
   localStorage.removeItem(PENDING_IMAGE_TASKS_KEY)
@@ -1441,12 +1444,16 @@ function replaceOrAppendMessage(messages: ChatMessage[], message: ChatMessage): 
 async function saveConversationSnapshot(
   conversationId: string,
   nextChatMessages: ChatMessage[],
-  nextGeneratedImages: GeneratedImage[]
+  nextGeneratedImages: GeneratedImage[],
+  nextPptState: PptWorkspaceState | null = currentConversationId.value === conversationId
+    ? currentPptWorkspaceState()
+    : null
 ): Promise<void> {
   const persistedImages = normalizeGeneratedImages(stripLoadingImages(nextGeneratedImages))
   const result = await saveConversationState(conversationId, {
     chatMessages: nextChatMessages,
-    generatedImages: persistedImages
+    generatedImages: persistedImages,
+    pptState: nextPptState
   })
   conversations.value = sortConversations(conversations.value.map((conversation) => (
     conversation.id === conversationId
@@ -1461,6 +1468,7 @@ async function saveConversationSnapshot(
   if (currentConversationId.value === conversationId) {
     chatMessages.value = nextChatMessages
     generatedImages.value = normalizeGeneratedImages(nextGeneratedImages)
+    applyPptWorkspaceState(nextPptState)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
   }
@@ -1477,6 +1485,7 @@ async function loadConversationById(conversationId: string): Promise<void> {
     persistActiveConversationId(payload.conversation.id)
     chatMessages.value = payload.state.chatMessages || []
     generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
+    applyPptWorkspaceState(payload.state.pptState || null)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
     restorePendingLoadingImages(payload.conversation.id)
@@ -1493,6 +1502,7 @@ async function startNewConversation(): Promise<void> {
     persistActiveConversationId(created.id)
     chatMessages.value = []
     generatedImages.value = []
+    applyPptWorkspaceState(null)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
   } finally {
@@ -2510,7 +2520,8 @@ async function handleSendChat(): Promise<void> {
             ...assistantMessage,
             content: extractResponseText(initialResponse) || '（模型没有返回文本）'
           }),
-          normalizeGeneratedImages(payload.state.generatedImages || [])
+          normalizeGeneratedImages(payload.state.generatedImages || []),
+          payload.state.pptState || null
         )
       }
       return
@@ -2663,7 +2674,7 @@ async function archivePendingImageFailure(pendingTask: PendingImageTask, message
     createdAt: Date.now()
   }
   nextMessages = replaceOrAppendMessage(nextMessages, failedMessage)
-  await saveConversationSnapshot(pendingTask.conversationId, nextMessages, nextImages)
+  await saveConversationSnapshot(pendingTask.conversationId, nextMessages, nextImages, payload.state.pptState || null)
 }
 
 async function archiveAssistantFailure(
@@ -2678,7 +2689,12 @@ async function archiveAssistantFailure(
     content: `对话请求失败：${message}`,
     createdAt: Date.now()
   })
-  await saveConversationSnapshot(conversationId, nextMessages, normalizeGeneratedImages(payload.state.generatedImages || []))
+  await saveConversationSnapshot(
+    conversationId,
+    nextMessages,
+    normalizeGeneratedImages(payload.state.generatedImages || []),
+    payload.state.pptState || null
+  )
 }
 
 async function completePendingImageTask(
@@ -2951,11 +2967,16 @@ async function refreshBalanceOnly(): Promise<void> {
 }
 
 async function handleGeneratePptPlan(): Promise<void> {
+  if (!currentConversationId.value) {
+    await startNewConversation()
+  }
+
   const apiKey = selectedKeySecret.value
   const prompt = pptPrompt.value.trim()
   const style = pptStyle.value.trim()
   const details = pptDesignDetails.value.trim()
   const pageCount = Math.min(Math.max(Number(pptPageCount.value) || 0, 1), 30)
+  const originConversationId = currentConversationId.value
 
   if (!apiKey) {
     setError('请先选择或创建一个 OpenAI 分组 API Key。')
@@ -3006,6 +3027,9 @@ async function handleGeneratePptPlan(): Promise<void> {
       pptPlan.value = buildMockPptPlan(prompt, style, details, pageCount)
       pptCurrentSlideIndex.value = 0
       persistPptDraft()
+      if (originConversationId) {
+        await saveConversationSnapshot(originConversationId, chatMessages.value, generatedImages.value)
+      }
       setSuccess('Mock 模式下已生成本地 PPT 分页方案。')
       return
     }
@@ -3044,6 +3068,9 @@ async function handleGeneratePptPlan(): Promise<void> {
     pptPlan.value = normalized
     pptCurrentSlideIndex.value = 0
     persistPptDraft()
+    if (originConversationId) {
+      await saveConversationSnapshot(originConversationId, chatMessages.value, generatedImages.value)
+    }
     setSuccess('PPT 分页方案已生成。')
     await refreshBalanceOnly()
   } catch (error) {

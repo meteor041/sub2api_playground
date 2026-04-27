@@ -1583,7 +1583,29 @@ function deriveConversationTitle(state) {
 function stateEnvelope(state) {
   return {
     chatMessages: Array.isArray(state?.chatMessages) ? state.chatMessages : [],
-    generatedImages: Array.isArray(state?.generatedImages) ? state.generatedImages : []
+    generatedImages: Array.isArray(state?.generatedImages) ? state.generatedImages : [],
+    pptState: state?.pptState && typeof state.pptState === 'object' && !Array.isArray(state.pptState)
+      ? state.pptState
+      : null
+  }
+}
+
+function normalizePptState(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return null
+  }
+
+  const plan = state.plan && typeof state.plan === 'object' && !Array.isArray(state.plan)
+    ? state.plan
+    : null
+
+  return {
+    prompt: typeof state.prompt === 'string' ? state.prompt : '',
+    style: typeof state.style === 'string' ? state.style : '',
+    designDetails: typeof state.designDetails === 'string' ? state.designDetails : '',
+    pageCount: Number.isFinite(Number(state.pageCount)) ? Math.min(Math.max(Number(state.pageCount), 1), 30) : 8,
+    model: typeof state.model === 'string' ? state.model : '',
+    plan
   }
 }
 
@@ -1669,7 +1691,8 @@ async function normalizeStateForStorage(userId, state) {
 
   return {
     chatMessages: storedMessages,
-    generatedImages: storedGeneratedImages
+    generatedImages: storedGeneratedImages,
+    pptState: normalizePptState(normalized.pptState)
   }
 }
 
@@ -1753,7 +1776,8 @@ async function hydrateConversationState(snapshot) {
 
   return {
     chatMessages,
-    generatedImages
+    generatedImages,
+    pptState: normalizePptState(normalized.pptState)
   }
 }
 

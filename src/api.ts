@@ -444,7 +444,7 @@ export function getConversation(conversationId: string): Promise<ConversationPay
 
 export function saveConversationState(
   conversationId: string,
-  payload: { chatMessages: unknown[]; generatedImages: unknown[] }
+  payload: { chatMessages: unknown[]; generatedImages: unknown[]; pptState?: unknown }
 ): Promise<{ savedAt: string; title: string }> {
   return request<{ savedAt: string; title: string }>(
     `/api/playground/conversations/${encodeURIComponent(conversationId)}`,

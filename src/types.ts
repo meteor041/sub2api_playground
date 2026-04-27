@@ -190,6 +190,7 @@ export interface ConversationPayload {
   state: {
     chatMessages: ChatMessage[]
     generatedImages: GeneratedImage[]
+    pptState?: PptWorkspaceState | null
   }
 }
 
@@ -211,4 +212,13 @@ export interface PptPlanResult {
   narrativeFlow: string
   visualSystem: string
   slides: PptSlidePlan[]
+}
+
+export interface PptWorkspaceState {
+  prompt: string
+  style: string
+  designDetails: string
+  pageCount: number
+  model: string
+  plan: PptPlanResult | null
 }
