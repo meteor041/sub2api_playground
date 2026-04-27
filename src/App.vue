@@ -3261,6 +3261,31 @@ async function handleDeleteCurrentPptSlide(): Promise<void> {
   setSuccess('当前页已删除。')
 }
 
+async function handleMoveCurrentPptSlide(direction: -1 | 1): Promise<void> {
+  if (!pptPlan.value || !currentPptSlide.value) {
+    setError('当前没有可移动的页面。')
+    return
+  }
+
+  const currentIndex = pptCurrentSlideIndex.value
+  const targetIndex = currentIndex + direction
+  if (targetIndex < 0 || targetIndex >= pptPlan.value.slides.length) {
+    return
+  }
+
+  const slides = [...pptPlan.value.slides]
+  const [movedSlide] = slides.splice(currentIndex, 1)
+  slides.splice(targetIndex, 0, movedSlide)
+  const normalizedSlides = normalizePptSlides(slides)
+  pptPlan.value = {
+    ...pptPlan.value,
+    slides: normalizedSlides
+  }
+  pptCurrentSlideIndex.value = targetIndex
+  await persistPptConversationState()
+  setSuccess(direction < 0 ? '当前页已上移。' : '当前页已下移。')
+}
+
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
 watch(() => pptSlides.value.length, (length) => {
   if (length <= 0) {
@@ -3789,6 +3814,22 @@ onBeforeUnmount(() => {
               <button
                 class="ghost mini"
                 type="button"
+                :disabled="pptBusy || !currentPptSlide || pptCurrentSlideIndex <= 0"
+                @click="handleMoveCurrentPptSlide(-1)"
+              >
+                上移当前页
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
+                :disabled="pptBusy || !currentPptSlide || pptCurrentSlideIndex >= pptSlides.length - 1"
+                @click="handleMoveCurrentPptSlide(1)"
+              >
+                下移当前页
+              </button>
+              <button
+                class="ghost mini"
+                type="button"
                 :disabled="pptBusy || !currentPptSlide"
                 @click="handleRewriteCurrentPptSlide"
               >
@@ -3978,6 +4019,22 @@ onBeforeUnmount(() => {
               />
             </label>
             <div class="ppt-editor-actions">
+              <button
+                class="secondary mini"
+                type="button"
+                :disabled="pptBusy || pptCurrentSlideIndex <= 0"
+                @click="handleMoveCurrentPptSlide(-1)"
+              >
+                上移
+              </button>
+              <button
+                class="secondary mini"
+                type="button"
+                :disabled="pptBusy || pptCurrentSlideIndex >= pptSlides.length - 1"
+                @click="handleMoveCurrentPptSlide(1)"
+              >
+                下移
+              </button>
               <button class="secondary mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
                 重写当前页
               </button>
