@@ -1,4 +1,5 @@
 export type UserRole = 'admin' | 'user'
+export type WorkspaceType = 'create' | 'ppt'
 
 export interface UserProfile {
   id: number
@@ -180,6 +181,7 @@ export interface ImageTaskStatus {
 export interface ConversationSummary {
   id: string
   title: string
+  workspaceType?: WorkspaceType
   createdAt: string
   updatedAt: string
   lastMessageAt?: string | null
@@ -188,6 +190,7 @@ export interface ConversationSummary {
 export interface ConversationPayload {
   conversation: ConversationSummary
   state: {
+    workspaceType?: WorkspaceType
     chatMessages: ChatMessage[]
     generatedImages: GeneratedImage[]
     pptState?: PptWorkspaceState | null

@@ -1591,8 +1591,26 @@ function deriveConversationTitle(state) {
   return '新会话'
 }
 
+function normalizeWorkspaceType(state) {
+  if (state?.workspaceType === 'create' || state?.workspaceType === 'ppt') {
+    return state.workspaceType
+  }
+
+  const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
+  const generatedImages = Array.isArray(state?.generatedImages) ? state.generatedImages : []
+  const hasPpt = Boolean(state?.pptState && typeof state.pptState === 'object' && !Array.isArray(state.pptState))
+  if (chatMessages.length > 0 || generatedImages.length > 0) {
+    return 'create'
+  }
+  if (hasPpt) {
+    return 'ppt'
+  }
+  return 'create'
+}
+
 function stateEnvelope(state) {
   return {
+    workspaceType: normalizeWorkspaceType(state),
     chatMessages: Array.isArray(state?.chatMessages) ? state.chatMessages : [],
     generatedImages: Array.isArray(state?.generatedImages) ? state.generatedImages : [],
     pptState: state?.pptState && typeof state.pptState === 'object' && !Array.isArray(state.pptState)
@@ -1701,6 +1719,7 @@ async function normalizeStateForStorage(userId, state) {
   }
 
   return {
+    workspaceType: normalizeWorkspaceType(normalized),
     chatMessages: storedMessages,
     generatedImages: storedGeneratedImages,
     pptState: normalizePptState(normalized.pptState)
@@ -1786,9 +1805,20 @@ async function hydrateConversationState(snapshot) {
   }
 
   return {
+    workspaceType: normalizeWorkspaceType(normalized),
     chatMessages,
     generatedImages,
     pptState: normalizePptState(normalized.pptState)
+  }
+}
+
+async function conversationWorkspaceType(userId, row) {
+  try {
+    const snapshotPath = await ensureConversationSnapshotPath(userId, row)
+    const snapshot = await readJsonFile(snapshotPath)
+    return normalizeWorkspaceType(snapshot)
+  } catch {
+    return 'create'
   }
 }
 
@@ -1802,21 +1832,22 @@ async function listConversations(userId) {
     [userId]
   )
 
-  return result.rows.map((row) => ({
+  return Promise.all(result.rows.map(async (row) => ({
     id: row.id,
     title: row.title,
+    workspaceType: await conversationWorkspaceType(userId, row),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at
-  }))
+  })))
 }
 
-async function createConversation(userId, requestedTitle = '') {
+async function createConversation(userId, requestedTitle = '', workspaceType = 'create') {
   const pool = requireDb()
   const id = randomUUID()
   const title = requestedTitle.trim() || '新会话'
   const snapshotPath = conversationSnapshotPath(userId, id)
-  await writeJsonFile(snapshotPath, stateEnvelope({}))
+  await writeJsonFile(snapshotPath, stateEnvelope({ workspaceType }))
 
   const result = await pool.query(
     `INSERT INTO playground_conversations (id, user_id, title, snapshot_path, created_at, updated_at)
@@ -1829,6 +1860,7 @@ async function createConversation(userId, requestedTitle = '') {
   return {
     id: row.id,
     title: row.title,
+    workspaceType,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at
@@ -1885,6 +1917,7 @@ async function loadConversation(userId, conversationId) {
     conversation: {
       id: row.id,
       title: row.title,
+      workspaceType: normalizeWorkspaceType(state),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastMessageAt: row.last_message_at
@@ -2513,7 +2546,8 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/playground/conversations') {
       const user = await getAuthenticatedUser(req)
       const body = await parseJsonBody(req)
-      const conversation = await createConversation(user.id, typeof body?.title === 'string' ? body.title : '')
+      const workspaceType = body?.workspace_type === 'ppt' ? 'ppt' : 'create'
+      const conversation = await createConversation(user.id, typeof body?.title === 'string' ? body.title : '', workspaceType)
       json(res, 201, { code: 0, message: 'success', data: conversation })
       return
     }

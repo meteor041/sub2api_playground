@@ -434,7 +434,14 @@ export function listConversations(): Promise<ConversationSummary[]> {
 export function createConversation(title = ''): Promise<ConversationSummary> {
   return request<ConversationSummary>('/api/playground/conversations', {
     method: 'POST',
-    body: JSON.stringify({ title })
+    body: JSON.stringify({ title, workspace_type: 'create' })
+  })
+}
+
+export function createPptConversation(title = ''): Promise<ConversationSummary> {
+  return request<ConversationSummary>('/api/playground/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ title, workspace_type: 'ppt' })
   })
 }
 
@@ -444,7 +451,7 @@ export function getConversation(conversationId: string): Promise<ConversationPay
 
 export function saveConversationState(
   conversationId: string,
-  payload: { chatMessages: unknown[]; generatedImages: unknown[]; pptState?: unknown }
+  payload: { workspaceType?: unknown; chatMessages: unknown[]; generatedImages: unknown[]; pptState?: unknown }
 ): Promise<{ savedAt: string; title: string }> {
   return request<{ savedAt: string; title: string }>(
     `/api/playground/conversations/${encodeURIComponent(conversationId)}`,

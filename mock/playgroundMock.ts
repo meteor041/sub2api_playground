@@ -42,10 +42,12 @@ interface MockApiKey {
 interface MockConversation {
   id: string
   title: string
+  workspaceType: 'create' | 'ppt'
   createdAt: string
   updatedAt: string
   lastMessageAt: string | null
   state: {
+    workspaceType?: 'create' | 'ppt'
     chatMessages: JsonRecord[]
     generatedImages: JsonRecord[]
     pptState?: JsonRecord | null
@@ -359,7 +361,8 @@ async function handleMockRequest(
     requireMockAuth(req)
     const body = await readJsonBody(req)
     const requestedTitle = typeof body.title === 'string' ? body.title.trim() : ''
-    const conversation = createMockConversation(requestedTitle)
+    const workspaceType = body.workspace_type === 'ppt' ? 'ppt' : 'create'
+    const conversation = createMockConversation(requestedTitle, workspaceType)
     conversations.set(conversation.id, conversation)
     sendJson(res, 201, envelope(summarizeConversation(conversation)))
     return true
@@ -381,6 +384,7 @@ async function handleMockRequest(
     const body = await readJsonBody(req)
     const conversation = getConversationOrThrow(conversationId)
     conversation.state = {
+      workspaceType: body.workspaceType === 'ppt' ? 'ppt' : (body.workspaceType === 'create' ? 'create' : conversation.workspaceType),
       chatMessages: Array.isArray(body.chatMessages) ? body.chatMessages as JsonRecord[] : [],
       generatedImages: Array.isArray(body.generatedImages) ? body.generatedImages as JsonRecord[] : [],
       pptState: body.pptState && typeof body.pptState === 'object' && !Array.isArray(body.pptState)
@@ -545,15 +549,17 @@ function nowIso(): string {
   return new Date().toISOString()
 }
 
-function createMockConversation(requestedTitle = ''): MockConversation {
+function createMockConversation(requestedTitle = '', workspaceType: 'create' | 'ppt' = 'create'): MockConversation {
   const createdAt = nowIso()
   return {
     id: randomUUID(),
     title: requestedTitle || '新会话',
+    workspaceType,
     createdAt,
     updatedAt: createdAt,
     lastMessageAt: null,
     state: {
+      workspaceType,
       chatMessages: [],
       generatedImages: [],
       pptState: null
@@ -573,6 +579,7 @@ function summarizeConversation(conversation: MockConversation): JsonRecord {
   return {
     id: conversation.id,
     title: conversation.title,
+    workspaceType: conversation.workspaceType,
     createdAt: conversation.createdAt,
     updatedAt: conversation.updatedAt,
     lastMessageAt: conversation.lastMessageAt
@@ -588,6 +595,7 @@ function touchConversation(conversation: MockConversation): void {
   const updatedAt = nowIso()
   conversation.updatedAt = updatedAt
   conversation.lastMessageAt = conversation.state.chatMessages.length > 0 ? updatedAt : null
+  conversation.workspaceType = conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create'
   conversation.title = deriveConversationTitle(conversation.state)
 }
 

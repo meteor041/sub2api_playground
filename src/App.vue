@@ -6,6 +6,7 @@ import {
   createConversation,
   createApiKey,
   createImageTask,
+  createPptConversation,
   deleteLibraryItem,
   getConversation,
   getImageTask,
@@ -330,7 +331,8 @@ const currentConversation = computed(() => (
   conversations.value.find((conversation) => conversation.id === currentConversationId.value) || null
 ))
 
-const pptTaskRecords = computed(() => conversations.value)
+const createTaskRecords = computed(() => conversations.value.filter((conversation) => (conversation.workspaceType || 'create') === 'create'))
+const pptTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'ppt'))
 
 const pptSlides = computed(() => pptPlan.value?.slides || [])
 
@@ -1518,10 +1520,14 @@ async function saveConversationSnapshot(
   nextGeneratedImages: GeneratedImage[],
   nextPptState: PptWorkspaceState | null = currentConversationId.value === conversationId
     ? currentPptWorkspaceState()
-    : null
+    : null,
+  workspaceType: 'create' | 'ppt' = conversationId === currentConversationId.value
+    ? (currentConversation.value?.workspaceType || (activeView.value === 'ppt' ? 'ppt' : 'create'))
+    : 'create'
 ): Promise<void> {
   const persistedImages = normalizeGeneratedImages(stripLoadingImages(nextGeneratedImages))
   const result = await saveConversationState(conversationId, {
+    workspaceType,
     chatMessages: nextChatMessages,
     generatedImages: persistedImages,
     pptState: nextPptState
@@ -1531,6 +1537,7 @@ async function saveConversationSnapshot(
       ? {
         ...conversation,
         title: result.title,
+        workspaceType,
         updatedAt: result.savedAt,
         lastMessageAt: result.savedAt
       }
@@ -1584,7 +1591,7 @@ async function startNewConversation(): Promise<void> {
 async function startNewPptTask(): Promise<void> {
   conversationBusy.value = true
   try {
-    const created = await createConversation('新 PPT 任务')
+    const created = await createPptConversation('新 PPT 任务')
     conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
     persistActiveConversationId(created.id)
     chatMessages.value = []
@@ -1615,7 +1622,10 @@ async function ensureConversationLoaded(): Promise<void> {
   await refreshConversationIndex()
 
   const savedConversationId = localStorage.getItem(ACTIVE_CONVERSATION_KEY) || ''
-  const preferredConversation = conversations.value.find((item) => item.id === savedConversationId) || conversations.value[0] || null
+  const preferredConversation = conversations.value.find((item) => item.id === savedConversationId) ||
+    createTaskRecords.value[0] ||
+    conversations.value[0] ||
+    null
 
   if (!preferredConversation) {
     await startNewConversation()
@@ -2629,7 +2639,8 @@ async function handleSendChat(): Promise<void> {
             content: extractResponseText(initialResponse) || '（模型没有返回文本）'
           }),
           normalizeGeneratedImages(payload.state.generatedImages || []),
-          payload.state.pptState || null
+          payload.state.pptState || null,
+          payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
         )
       }
       return
@@ -2782,7 +2793,13 @@ async function archivePendingImageFailure(pendingTask: PendingImageTask, message
     createdAt: Date.now()
   }
   nextMessages = replaceOrAppendMessage(nextMessages, failedMessage)
-  await saveConversationSnapshot(pendingTask.conversationId, nextMessages, nextImages, payload.state.pptState || null)
+  await saveConversationSnapshot(
+    pendingTask.conversationId,
+    nextMessages,
+    nextImages,
+    payload.state.pptState || null,
+    payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
+  )
 }
 
 async function archiveAssistantFailure(
@@ -2801,7 +2818,8 @@ async function archiveAssistantFailure(
     conversationId,
     nextMessages,
     normalizeGeneratedImages(payload.state.generatedImages || []),
-    payload.state.pptState || null
+    payload.state.pptState || null,
+    payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
   )
 }
 
@@ -4885,7 +4903,7 @@ onBeforeUnmount(() => {
             </div>
             <div class="session-list work-scroll">
               <button
-                v-for="conversation in conversations"
+                v-for="conversation in createTaskRecords"
                 :key="conversation.id"
                 class="session-item"
                 :class="{ active: conversation.id === currentConversationId }"
@@ -4896,7 +4914,7 @@ onBeforeUnmount(() => {
                 <strong>{{ conversation.title }}</strong>
                 <span>{{ conversation.lastMessageAt || conversation.updatedAt }}</span>
               </button>
-              <p v-if="conversations.length === 0" class="empty">暂无会话。</p>
+              <p v-if="createTaskRecords.length === 0" class="empty">暂无会话。</p>
             </div>
           </div>
 
