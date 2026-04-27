@@ -351,6 +351,14 @@ const currentPptSlideImage = computed(() => {
   return generatedImages.value.find((image) => image.id === imageId) || null
 })
 
+const currentPptSlideImageIndex = computed(() => {
+  const imageId = currentPptSlide.value?.slideImageId
+  if (!imageId) {
+    return -1
+  }
+  return generatedImages.value.findIndex((image) => image.id === imageId)
+})
+
 const activePendingTaskIds = new Set<string>()
 
 interface ResponseFunctionCall {
@@ -4311,7 +4319,7 @@ onBeforeUnmount(() => {
                       :alt="currentPptSlide.title"
                       loading="lazy"
                       @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                      @click="openImageModal(currentPptSlideImage, generatedImages.findIndex((image) => image.id === currentPptSlideImage.id))"
+                      @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
                     />
                   </div>
                   <div v-else class="ppt-slide-image-empty">
