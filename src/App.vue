@@ -649,9 +649,20 @@ function buildCompressedPreviewUrl(source: string, width = galleryPreviewWidth):
   if (!source || source.startsWith('data:')) {
     return source
   }
+  if (source.startsWith('/api/playground/assets/')) {
+    return source
+  }
   const safeWidth = Number.isFinite(width) && width > 0 ? Math.round(width) : galleryPreviewWidth
   const absoluteSource = toAbsoluteAssetUrl(source)
   if (!/^https?:\/\//i.test(absoluteSource)) {
+    return source
+  }
+  try {
+    const url = new URL(absoluteSource)
+    if (url.origin === window.location.origin && url.pathname.startsWith('/api/playground/assets/')) {
+      return source
+    }
+  } catch {
     return source
   }
   return `/cdn-cgi/image/width=${safeWidth},quality=70,format=webp,fit=scale-down/${absoluteSource}`

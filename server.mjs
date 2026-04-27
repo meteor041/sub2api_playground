@@ -2314,16 +2314,24 @@ async function normalizeStateForStorage(userId, state) {
 
   const storedGeneratedImages = []
   for (const image of normalized.generatedImages) {
+    const imageDataUrl = typeof image.dataUrl === 'string' ? image.dataUrl.trim() : ''
+    const imageUrl = typeof image.image_url === 'string' ? image.image_url.trim() : ''
+    const imageRemoteUrl = typeof image.remoteUrl === 'string' ? image.remoteUrl.trim() : ''
+    const derivedAssetToken = (
+      typeof image.assetToken === 'string' && image.assetToken.trim()
+        ? image.assetToken.trim()
+        : ''
+    ) || assetTokenFromUrl(imageDataUrl) || assetTokenFromUrl(imageUrl) || assetTokenFromUrl(imageRemoteUrl)
     let asset = null
-    if (image.assetToken) {
+    if (derivedAssetToken) {
       asset = await persistAsset(userId, 'generated-image', {
-        assetToken: image.assetToken,
-        dataUrl: image.dataUrl,
+        assetToken: derivedAssetToken,
+        dataUrl: imageDataUrl,
         mimeType: 'image/png'
       })
-    } else if (typeof image.dataUrl === 'string' && image.dataUrl.startsWith('data:')) {
+    } else if (imageDataUrl.startsWith('data:')) {
       asset = await persistAsset(userId, 'generated-image', {
-        dataUrl: image.dataUrl,
+        dataUrl: imageDataUrl,
         mimeType: 'image/png'
       })
     }
@@ -2335,7 +2343,7 @@ async function normalizeStateForStorage(userId, state) {
       size: image.size,
       createdAt: image.createdAt,
       assetToken: asset?.public_token || null,
-      remoteUrl: image.remoteUrl || null
+      remoteUrl: imageRemoteUrl || imageUrl || imageDataUrl || null
     })
   }
 
