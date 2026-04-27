@@ -825,11 +825,24 @@ h2 {
   height: 12px;
 }
 
-.ppt-editor-view {
-  min-height: 0;
+.ppt-editor-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 13;
+  background: rgba(15, 23, 42, 0.26);
+  backdrop-filter: blur(10px);
+}
+
+.ppt-editor-modal {
+  position: absolute;
+  inset: 28px 28px 28px 28px;
+  z-index: 14;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 14px;
+  padding: 22px;
+  border-radius: 24px;
+  overflow: hidden;
 }
 
 .ppt-editor-sheet {
@@ -2698,6 +2711,10 @@ h2 {
   .ppt-slide-body {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .ppt-editor-modal {
+    inset: 20px;
+  }
 }
 
 @media (max-width: 820px) {
@@ -2774,6 +2791,12 @@ h2 {
   .ppt-skeleton-row,
   .ppt-deck-track {
     grid-auto-columns: minmax(280px, 84vw);
+  }
+
+  .ppt-editor-modal {
+    inset: 12px;
+    padding: 16px;
+    border-radius: 20px;
   }
 
   .ppt-config-drawer {

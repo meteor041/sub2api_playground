@@ -4427,82 +4427,6 @@ onBeforeUnmount(() => {
               </article>
             </div>
 
-            <div v-else-if="pptEditorOpen && currentPptSlide" class="ppt-editor-view">
-              <div class="ppt-editor-topbar">
-                <button class="ghost mini" type="button" @click="closePptSlideEditor">
-                  返回卡片
-                </button>
-                <div class="ppt-editor-topbar-actions">
-                  <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
-                    重写
-                  </button>
-                  <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
-                    配图
-                  </button>
-                </div>
-              </div>
-              <article class="ppt-editor-sheet">
-                <header class="ppt-slide-header">
-                  <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
-                  <strong>{{ currentPptSlide.title }}</strong>
-                  <p>{{ currentPptSlide.objective }}</p>
-                </header>
-                <div class="ppt-editor-sheet-body">
-                  <div class="ppt-slide-column ppt-slide-column-main">
-                    <section class="ppt-slide-points">
-                      <span class="ppt-slide-label">核心内容</span>
-                      <ul>
-                        <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
-                      </ul>
-                    </section>
-                    <div class="ppt-slide-grid">
-                      <section>
-                        <span class="ppt-slide-label">版式</span>
-                        <p>{{ currentPptSlide.layout }}</p>
-                      </section>
-                      <section>
-                        <span class="ppt-slide-label">视觉方向</span>
-                        <p>{{ currentPptSlide.visualDirection }}</p>
-                      </section>
-                    </div>
-                    <section class="ppt-slide-notes">
-                      <span class="ppt-slide-label">讲述建议</span>
-                      <p>{{ currentPptSlide.speakerNotes }}</p>
-                    </section>
-                    <section class="ppt-slide-prompt">
-                      <span class="ppt-slide-label">当前页编辑指令</span>
-                      <textarea
-                        v-model="pptSlideEditPrompt"
-                        rows="5"
-                        placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
-                      />
-                    </section>
-                  </div>
-                  <div class="ppt-slide-column ppt-slide-column-side">
-                    <section class="ppt-slide-image-panel">
-                      <span class="ppt-slide-label">本页配图</span>
-                      <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
-                        <img
-                          :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
-                          :alt="currentPptSlide.title"
-                          loading="lazy"
-                          @error="handleGeneratedImageError($event, currentPptSlideImage)"
-                          @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
-                        />
-                      </div>
-                      <div v-else class="ppt-slide-image-empty">
-                        <span>当前页还没有生成配图。</span>
-                      </div>
-                    </section>
-                    <section class="ppt-slide-prompt">
-                      <span class="ppt-slide-label">本页制作 Prompt</span>
-                      <p>{{ currentPptSlide.generationPrompt }}</p>
-                    </section>
-                  </div>
-                </div>
-              </article>
-            </div>
-
             <div v-else-if="pptSlides.length > 0" class="ppt-deck">
               <div class="ppt-deck-track">
                 <article
@@ -4547,6 +4471,83 @@ onBeforeUnmount(() => {
               <span>打开右侧设置，输入内容和风格后生成整套分页。页面会以横向大卡片形式呈现，再进入单页编辑。</span>
             </div>
           </div>
+        </section>
+
+        <div v-if="pptEditorOpen && currentPptSlide" class="ppt-editor-modal-backdrop" @click="closePptSlideEditor"></div>
+        <section v-if="pptEditorOpen && currentPptSlide" class="ppt-editor-modal panel" aria-label="PPT 页面编辑详情">
+          <div class="ppt-editor-topbar">
+            <button class="ghost mini" type="button" @click="closePptSlideEditor">
+              返回卡片
+            </button>
+            <div class="ppt-editor-topbar-actions">
+              <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleRewriteCurrentPptSlide">
+                重写
+              </button>
+              <button class="ghost mini" type="button" :disabled="pptBusy" @click="handleGenerateCurrentPptSlideImage">
+                配图
+              </button>
+            </div>
+          </div>
+          <article class="ppt-editor-sheet">
+            <header class="ppt-slide-header">
+              <span class="ppt-slide-index">第 {{ pptCurrentSlideIndex + 1 }} / {{ pptSlides.length }} 页</span>
+              <strong>{{ currentPptSlide.title }}</strong>
+              <p>{{ currentPptSlide.objective }}</p>
+            </header>
+            <div class="ppt-editor-sheet-body">
+              <div class="ppt-slide-column ppt-slide-column-main">
+                <section class="ppt-slide-points">
+                  <span class="ppt-slide-label">核心内容</span>
+                  <ul>
+                    <li v-for="(point, pointIndex) in currentPptSlide.keyPoints" :key="`${currentPptSlide.pageNumber}-${pointIndex}`">{{ point }}</li>
+                  </ul>
+                </section>
+                <div class="ppt-slide-grid">
+                  <section>
+                    <span class="ppt-slide-label">版式</span>
+                    <p>{{ currentPptSlide.layout }}</p>
+                  </section>
+                  <section>
+                    <span class="ppt-slide-label">视觉方向</span>
+                    <p>{{ currentPptSlide.visualDirection }}</p>
+                  </section>
+                </div>
+                <section class="ppt-slide-notes">
+                  <span class="ppt-slide-label">讲述建议</span>
+                  <p>{{ currentPptSlide.speakerNotes }}</p>
+                </section>
+                <section class="ppt-slide-prompt">
+                  <span class="ppt-slide-label">当前页编辑指令</span>
+                  <textarea
+                    v-model="pptSlideEditPrompt"
+                    rows="5"
+                    placeholder="例如：这一页改成更强的数据对比结构；或在当前页后插入一页客户案例。"
+                  />
+                </section>
+              </div>
+              <div class="ppt-slide-column ppt-slide-column-side">
+                <section class="ppt-slide-image-panel">
+                  <span class="ppt-slide-label">本页配图</span>
+                  <div v-if="currentPptSlideImage" class="ppt-slide-image-wrap">
+                    <img
+                      :src="imagePreviewUrl(currentPptSlideImage, modalPreviewWidth)"
+                      :alt="currentPptSlide.title"
+                      loading="lazy"
+                      @error="handleGeneratedImageError($event, currentPptSlideImage)"
+                      @click="openImageModal(currentPptSlideImage, currentPptSlideImageIndex)"
+                    />
+                  </div>
+                  <div v-else class="ppt-slide-image-empty">
+                    <span>当前页还没有生成配图。</span>
+                  </div>
+                </section>
+                <section class="ppt-slide-prompt">
+                  <span class="ppt-slide-label">本页制作 Prompt</span>
+                  <p>{{ currentPptSlide.generationPrompt }}</p>
+                </section>
+              </div>
+            </div>
+          </article>
         </section>
 
         <div v-if="pptConfigPanelOpen" class="ppt-drawer-backdrop" @click="pptConfigPanelOpen = false"></div>
