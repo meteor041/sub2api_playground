@@ -70,7 +70,8 @@ const imageSizeOptions = [
 ]
 const imageSizes = imageSizeOptions.map((option) => option.value)
 const maxImageToolCallsPerTurn = 1
-const ACTIVE_CONVERSATION_KEY = 'playground_active_conversation_id'
+const ACTIVE_CREATE_CONVERSATION_KEY = 'playground_active_create_conversation_id'
+const ACTIVE_PPT_CONVERSATION_KEY = 'playground_active_ppt_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
 const THEME_MODE_KEY = 'playground_theme_mode'
 const PPT_DRAFT_KEY = 'playground_ppt_draft'
@@ -1448,18 +1449,33 @@ function sortConversations(items: ConversationSummary[]): ConversationSummary[] 
   })
 }
 
-function persistActiveConversationId(conversationId: string): void {
+function workspaceConversationStorageKey(workspaceType: 'create' | 'ppt'): string {
+  return workspaceType === 'ppt' ? ACTIVE_PPT_CONVERSATION_KEY : ACTIVE_CREATE_CONVERSATION_KEY
+}
+
+function readActiveConversationId(workspaceType: 'create' | 'ppt'): string {
+  return localStorage.getItem(workspaceConversationStorageKey(workspaceType)) || ''
+}
+
+function clearActiveConversationIds(): void {
+  localStorage.removeItem(ACTIVE_CREATE_CONVERSATION_KEY)
+  localStorage.removeItem(ACTIVE_PPT_CONVERSATION_KEY)
+}
+
+function persistActiveConversationId(conversationId: string, workspaceType: 'create' | 'ppt'): void {
   currentConversationId.value = conversationId
+  const storageKey = workspaceConversationStorageKey(workspaceType)
   if (conversationId) {
-    localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversationId)
+    localStorage.setItem(storageKey, conversationId)
   } else {
-    localStorage.removeItem(ACTIVE_CONVERSATION_KEY)
+    localStorage.removeItem(storageKey)
   }
 }
 
 function resetConversationState(): void {
   conversations.value = []
-  persistActiveConversationId('')
+  currentConversationId.value = ''
+  clearActiveConversationIds()
   chatMessages.value = []
   generatedImages.value = []
   applyPptWorkspaceState(null)
@@ -1594,7 +1610,8 @@ async function loadConversationById(conversationId: string): Promise<void> {
   conversationBusy.value = true
   try {
     const payload = await getConversation(conversationId)
-    persistActiveConversationId(payload.conversation.id)
+    const workspaceType = payload.conversation.workspaceType === 'ppt' ? 'ppt' : 'create'
+    persistActiveConversationId(payload.conversation.id, workspaceType)
     chatMessages.value = payload.state.chatMessages || []
     generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
     applyPptWorkspaceState(payload.state.pptState || null)
@@ -1611,7 +1628,7 @@ async function startNewConversation(): Promise<void> {
   try {
     const created = await createConversation()
     conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
-    persistActiveConversationId(created.id)
+    persistActiveConversationId(created.id, 'create')
     chatMessages.value = []
     generatedImages.value = []
     applyPptWorkspaceState(null)
@@ -1627,7 +1644,7 @@ async function startNewPptTask(): Promise<void> {
   try {
     const created = await createPptConversation('新 PPT 任务')
     conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
-    persistActiveConversationId(created.id)
+    persistActiveConversationId(created.id, 'ppt')
     chatMessages.value = []
     generatedImages.value = []
     applyPptWorkspaceState(null)
@@ -1649,23 +1666,27 @@ async function handlePptTaskSelect(conversationId: string): Promise<void> {
   if (!conversationId) {
     return
   }
-  currentConversationId.value = conversationId
+  persistActiveConversationId(conversationId, 'ppt')
   activeView.value = 'ppt'
   pptEditorOpen.value = false
   await handleConversationSelect()
 }
 
-async function ensureConversationLoaded(): Promise<void> {
+async function ensureConversationLoaded(workspaceType: 'create' | 'ppt' = 'create'): Promise<void> {
   await refreshConversationIndex()
 
-  const savedConversationId = localStorage.getItem(ACTIVE_CONVERSATION_KEY) || ''
-  const preferredConversation = conversations.value.find((item) => item.id === savedConversationId) ||
-    createTaskRecords.value[0] ||
-    conversations.value[0] ||
+  const records = workspaceType === 'ppt' ? pptTaskRecords.value : createTaskRecords.value
+  const savedConversationId = readActiveConversationId(workspaceType)
+  const preferredConversation = records.find((item) => item.id === savedConversationId) ||
+    records[0] ||
     null
 
   if (!preferredConversation) {
-    await startNewConversation()
+    if (workspaceType === 'ppt') {
+      await startNewPptTask()
+    } else {
+      await startNewConversation()
+    }
     return
   }
 
@@ -1692,6 +1713,15 @@ async function handleConversationSelect(): Promise<void> {
     return
   }
   await loadConversationById(currentConversationId.value)
+}
+
+async function handleCreateConversationSelect(conversationId: string): Promise<void> {
+  if (!conversationId) {
+    return
+  }
+  persistActiveConversationId(conversationId, 'create')
+  activeView.value = 'create'
+  await handleConversationSelect()
 }
 
 async function refreshWorkspace(): Promise<void> {
@@ -1726,7 +1756,7 @@ async function handleLogin(): Promise<void> {
     isAuthenticated.value = true
     setSuccess('登录成功，正在加载 Playground。')
     await refreshWorkspace()
-    await ensureConversationLoaded()
+    await ensureConversationLoaded(activeView.value === 'ppt' ? 'ppt' : 'create')
   } catch (error) {
     setError(error instanceof Error ? error.message : '登录失败')
   } finally {
@@ -3841,6 +3871,13 @@ watch(activeView, async (view) => {
     return
   }
   if (view !== 'gallery') {
+    if (isAuthenticated.value && (view === 'create' || view === 'ppt')) {
+      const workspaceType = view === 'ppt' ? 'ppt' : 'create'
+      const currentWorkspaceType = currentConversation.value?.workspaceType === 'ppt' ? 'ppt' : 'create'
+      if (!currentConversationId.value || currentWorkspaceType !== workspaceType) {
+        await ensureConversationLoaded(workspaceType)
+      }
+    }
     return
   }
   await nextTick()
@@ -3904,7 +3941,7 @@ onMounted(async () => {
   setupGalleryObserver()
   if (isAuthenticated.value) {
     await refreshWorkspace()
-    await ensureConversationLoaded()
+    await ensureConversationLoaded(activeView.value === 'ppt' ? 'ppt' : 'create')
     resumePendingImageTasks()
   }
 })
@@ -5037,7 +5074,7 @@ onBeforeUnmount(() => {
                 :class="{ active: conversation.id === currentConversationId }"
                 type="button"
                 :disabled="conversationBusy"
-                @click="currentConversationId = conversation.id; handleConversationSelect()"
+                @click="handleCreateConversationSelect(conversation.id)"
               >
                 <strong>{{ conversation.title }}</strong>
                 <span>{{ conversation.lastMessageAt || conversation.updatedAt }}</span>
