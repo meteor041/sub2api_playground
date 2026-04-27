@@ -1974,8 +1974,10 @@ async function archiveImageTaskToConversation(task) {
   })
 
   await saveConversationState(task.userId, task.payload.conversation_id, {
+    workspaceType: conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create',
     chatMessages: nextMessages,
-    generatedImages: nextImages
+    generatedImages: nextImages,
+    pptState: conversation.state.pptState || null
   })
   if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
     const originalResultImages = task.result.images
