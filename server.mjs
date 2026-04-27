@@ -1534,13 +1534,20 @@ async function createPptxBuffer(userId, req, payload) {
       let imageRelId = ''
 
       if (source) {
-        const image = await loadPptExportImage(userId, req, source)
-        if (image?.buffer?.length) {
-          const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
-          mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
-          imageRelId = 'rId2'
-          imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
-          await writeFile(path.join(packageRoot, 'ppt', 'media', mediaFileName), image.buffer)
+        try {
+          const image = await loadPptExportImage(userId, req, source)
+          if (image?.buffer?.length) {
+            const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
+            mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
+            imageRelId = 'rId2'
+            imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
+            await writeFile(path.join(packageRoot, 'ppt', 'media', mediaFileName), image.buffer)
+          }
+        } catch (error) {
+          console.warn(
+            `PPT export image skipped for user ${userId}, slide ${index + 1}:`,
+            error instanceof Error ? error.message : error
+          )
         }
       }
 
