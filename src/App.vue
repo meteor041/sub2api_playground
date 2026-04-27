@@ -555,6 +555,44 @@ function normalizeGeneratedImages(images: GeneratedImage[]): GeneratedImage[] {
   })
 }
 
+function assetTokenFromClientUrl(value: string): string {
+  const match = value.match(/\/api\/playground\/assets\/([^/?#]+)/)
+  return match?.[1] || ''
+}
+
+function repairGeneratedImagesFromPptPlan(
+  plan: PptPlanResult | null,
+  images: GeneratedImage[] = generatedImages.value
+): GeneratedImage[] {
+  if (!plan) {
+    return normalizeGeneratedImages(images)
+  }
+
+  const nextImages = [...images]
+  const existingIds = new Set(nextImages.map((image) => image.id))
+
+  for (const slide of plan.slides) {
+    if (!slide.slideImageId || !slide.slideImageUrl || existingIds.has(slide.slideImageId)) {
+      continue
+    }
+
+    const assetToken = assetTokenFromClientUrl(slide.slideImageUrl)
+    nextImages.push({
+      id: slide.slideImageId,
+      shareKey: slide.slideImageId,
+      prompt: slide.generationPrompt || slide.title,
+      size: '1536x864',
+      assetToken: assetToken || undefined,
+      image_url: slide.slideImageUrl,
+      remoteUrl: assetToken ? undefined : slide.slideImageUrl,
+      createdAt: Date.now()
+    })
+    existingIds.add(slide.slideImageId)
+  }
+
+  return normalizeGeneratedImages(nextImages)
+}
+
 function isImageLoading(image?: GeneratedImage | null): boolean {
   return image?.status === 'loading'
 }
@@ -1301,7 +1339,8 @@ function hydratePptPlanSlideImages(
 }
 
 function currentPptWorkspaceState(): PptWorkspaceState {
-  const normalizedPlan = hydratePptPlanSlideImages(pptPlan.value ? normalizePptPlan(pptPlan.value) : null)
+  const repairedImages = repairGeneratedImagesFromPptPlan(pptPlan.value ? normalizePptPlan(pptPlan.value) : null)
+  const normalizedPlan = hydratePptPlanSlideImages(pptPlan.value ? normalizePptPlan(pptPlan.value) : null, repairedImages)
   return {
     prompt: pptPrompt.value,
     style: pptStyle.value,
@@ -1748,7 +1787,8 @@ async function saveConversationSnapshot(
     ? (currentConversation.value?.workspaceType || (activeView.value === 'ppt' ? 'ppt' : 'create'))
     : 'create'
 ): Promise<void> {
-  const persistedImages = normalizeGeneratedImages(stripLoadingImages(nextGeneratedImages))
+  const repairedImages = repairGeneratedImagesFromPptPlan(nextPptState?.plan || null, stripLoadingImages(nextGeneratedImages))
+  const persistedImages = normalizeGeneratedImages(repairedImages)
   const result = await saveConversationState(conversationId, {
     workspaceType,
     chatMessages: nextChatMessages,
@@ -1768,7 +1808,7 @@ async function saveConversationSnapshot(
   )))
   if (currentConversationId.value === conversationId) {
     chatMessages.value = nextChatMessages
-    generatedImages.value = normalizeGeneratedImages(nextGeneratedImages)
+    generatedImages.value = persistedImages
     applyPptWorkspaceState(nextPptState)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
@@ -1799,7 +1839,8 @@ async function loadConversationById(conversationId: string): Promise<void> {
     )))
     persistActiveConversationId(payload.conversation.id, workspaceType)
     chatMessages.value = payload.state.chatMessages || []
-    generatedImages.value = normalizeGeneratedImages(payload.state.generatedImages || [])
+    const repairedImages = repairGeneratedImagesFromPptPlan(payload.state.pptState?.plan || null, payload.state.generatedImages || [])
+    generatedImages.value = normalizeGeneratedImages(repairedImages)
     applyPptWorkspaceState(payload.state.pptState || null)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
