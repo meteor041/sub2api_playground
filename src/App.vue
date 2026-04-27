@@ -3738,8 +3738,12 @@ async function handleGenerateCurrentPptSlideImage(): Promise<void> {
     setError('当前没有可生成图片的页面。')
     return
   }
-  if (!currentConversationId.value) {
-    await startNewConversation()
+  if (!currentConversationId.value || currentConversation.value?.workspaceType !== 'ppt') {
+    await ensureConversationLoaded('ppt')
+  }
+  if (!currentConversationId.value || currentConversation.value?.workspaceType !== 'ppt') {
+    setError('当前没有可用的 PPT 任务，请先新建或选择一个 PPT 任务。')
+    return
   }
 
   pptBusy.value = true
@@ -3761,8 +3765,12 @@ async function handleGenerateAllPptSlideImages(): Promise<void> {
     setError('当前没有可生成图片的分页。')
     return
   }
-  if (!currentConversationId.value) {
-    await startNewConversation()
+  if (!currentConversationId.value || currentConversation.value?.workspaceType !== 'ppt') {
+    await ensureConversationLoaded('ppt')
+  }
+  if (!currentConversationId.value || currentConversation.value?.workspaceType !== 'ppt') {
+    setError('当前没有可用的 PPT 任务，请先新建或选择一个 PPT 任务。')
+    return
   }
 
   const originalIndex = pptCurrentSlideIndex.value
