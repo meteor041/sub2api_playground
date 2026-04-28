@@ -1915,6 +1915,8 @@ h2 {
 
 .login-card-actions {
   margin-top: 18px;
+  display: flex;
+  justify-content: center;
 }
 
 .login-register-link {
