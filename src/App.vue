@@ -4456,39 +4456,41 @@ onBeforeUnmount(() => {
         </button>
       </nav>
 
-      <div v-if="!mainSidebarCollapsed" class="sidebar-account">
-        <template v-if="isAuthenticated">
-          <span>已登录</span>
-          <strong>{{ displayName }}</strong>
-          <small>{{ balanceLabel }}</small>
-          <button class="ghost mini" type="button" @click="handleLogout">
-            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-1px;margin-right:3px">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
-            </svg>退出
-          </button>
-        </template>
-        <template v-else>
-          <span>游客模式</span>
-          <strong>公共画廊可浏览</strong>
-          <button class="primary mini" type="button" @click="activeView = 'create'">登录创造</button>
-        </template>
+      <div class="sidebar-footer">
+        <div v-if="!mainSidebarCollapsed" class="sidebar-account">
+          <template v-if="isAuthenticated">
+            <span>已登录</span>
+            <strong>{{ displayName }}</strong>
+            <small>{{ balanceLabel }}</small>
+            <button class="ghost mini" type="button" @click="handleLogout">
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;vertical-align:-1px;margin-right:3px">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>
+              </svg>退出
+            </button>
+          </template>
+          <template v-else>
+            <span>游客模式</span>
+            <strong>公共画廊可浏览</strong>
+            <button class="primary mini" type="button" @click="activeView = 'create'">登录创造</button>
+          </template>
+        </div>
+        <div v-else class="sidebar-account-mini">
+          <div class="account-dot" :class="{ 'account-dot-active': isAuthenticated }" :title="isAuthenticated ? displayName : '游客模式'"></div>
+        </div>
+        <a
+          class="sidebar-repo-link"
+          href="https://github.com/meteor041/sub2api_playground"
+          target="_blank"
+          rel="noreferrer"
+          :aria-label="mainSidebarCollapsed ? '打开 GitHub 仓库' : undefined"
+          :title="mainSidebarCollapsed ? 'GitHub 仓库' : '在 GitHub 查看仓库'"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.3 6.84 9.64.5.09.68-.22.68-.49 0-.24-.01-1.03-.01-1.87-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.84c.85 0 1.71.12 2.51.36 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.95.68 1.92 0 1.39-.01 2.5-.01 2.84 0 .27.18.59.69.49A10.23 10.23 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z" />
+          </svg>
+          <span v-if="!mainSidebarCollapsed">GitHub 仓库</span>
+        </a>
       </div>
-      <div v-else class="sidebar-account-mini">
-        <div class="account-dot" :class="{ 'account-dot-active': isAuthenticated }" :title="isAuthenticated ? displayName : '游客模式'"></div>
-      </div>
-      <a
-        class="sidebar-repo-link"
-        href="https://github.com/meteor041/sub2api_playground"
-        target="_blank"
-        rel="noreferrer"
-        :aria-label="mainSidebarCollapsed ? '打开 GitHub 仓库' : undefined"
-        :title="mainSidebarCollapsed ? 'GitHub 仓库' : '在 GitHub 查看仓库'"
-      >
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <path d="M12 2C6.48 2 2 6.58 2 12.22c0 4.5 2.87 8.3 6.84 9.64.5.09.68-.22.68-.49 0-.24-.01-1.03-.01-1.87-2.78.62-3.37-1.21-3.37-1.21-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.72 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.84c.85 0 1.71.12 2.51.36 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.46.1 2.72.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.79-4.57 5.05.36.32.68.95.68 1.92 0 1.39-.01 2.5-.01 2.84 0 .27.18.59.69.49A10.23 10.23 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z" />
-        </svg>
-        <span v-if="!mainSidebarCollapsed">GitHub 仓库</span>
-      </a>
     </aside>
 
     <section v-if="activeView === 'gallery'" class="page gallery-page">

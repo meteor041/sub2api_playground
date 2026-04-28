@@ -194,7 +194,8 @@ h2 {
   gap: 20px;
   height: 100vh;
   padding: 16px 14px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-right: 1px solid var(--line);
   background: var(--sidebar-bg);
   backdrop-filter: blur(20px);
@@ -289,9 +290,15 @@ h2 {
 }
 
 .sidebar-account-mini {
-  margin-top: auto;
   display: flex;
   justify-content: center;
+}
+
+.sidebar-footer {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 4px;
 }
 
 .account-dot {
@@ -387,7 +394,6 @@ h2 {
 .sidebar-account {
   display: grid;
   gap: 8px;
-  margin-top: auto;
   border: 1px solid var(--line);
   border-radius: 24px;
   padding: 16px;
@@ -398,7 +404,6 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-top: 10px;
   padding: 10px 12px;
   color: var(--muted);
   text-decoration: none;
@@ -3267,6 +3272,11 @@ h2 {
   .app-shell.sidebar-collapsed .sidebar {
     padding: 12px 14px;
     align-items: flex-start;
+  }
+
+  .sidebar-footer {
+    margin-top: 0;
+    width: 100%;
   }
 
   .side-nav {
