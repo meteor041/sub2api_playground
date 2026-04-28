@@ -2578,6 +2578,10 @@ function hasStreamingImageResult(task: ImageTaskStatus): boolean {
   return Boolean(task.result?.raw && typeof task.result.raw === 'object' && (task.result.raw as Record<string, unknown>).stream)
 }
 
+function isTerminalImageTask(task: ImageTaskStatus | null): task is ImageTaskStatus {
+  return task?.status === 'completed' || task?.status === 'failed'
+}
+
 function mergeStreamingTaskImages(task: ImageTaskStatus): void {
   if (!currentConversationId.value || task.conversation_id !== currentConversationId.value) {
     return
@@ -2637,7 +2641,7 @@ async function waitForImageTask(
       throw error
     }
     const streamedTask = latestTask
-    if (streamedTask && (streamedTask.status === 'completed' || streamedTask.status === 'failed')) {
+    if (isTerminalImageTask(streamedTask)) {
       return streamedTask
     }
     return pollImageTask(taskId, onStatus)
