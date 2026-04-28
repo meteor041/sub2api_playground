@@ -1913,6 +1913,31 @@ h2 {
   padding: 32px;
 }
 
+.login-card-actions {
+  margin-top: 18px;
+}
+
+.login-register-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0.8rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  color: var(--ink);
+  background: var(--ghost-bg);
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 180ms ease, background 180ms ease, border-color 180ms ease;
+}
+
+.login-register-link:hover {
+  border-color: rgba(255, 79, 46, 0.28);
+  background: var(--secondary-bg);
+  transform: translateY(-1px);
+}
+
 .login-form,
 .image-form,
 .composer-main,
