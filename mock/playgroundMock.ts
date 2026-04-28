@@ -66,6 +66,8 @@ interface MockGalleryItem {
   sourceImageId: string
   sharedByUserId: number
   sharedByName: string
+  likeCount: number
+  likedByViewer: boolean
   createdAt: string
 }
 
@@ -307,8 +309,19 @@ async function handleMockRequest(
   if (method === 'GET' && url.pathname === '/api/playground/gallery') {
     const limit = clampInt(url.searchParams.get('limit'), 8, 1, 12)
     const offset = clampInt(url.searchParams.get('offset'), 0, 0, galleryItems.length)
-    const items = galleryItems.slice(offset, offset + limit)
-    const nextOffset = offset + items.length < galleryItems.length ? offset + items.length : null
+    const query = pickString(url.searchParams.get('query')).trim().toLowerCase()
+    const user = pickString(url.searchParams.get('user')).trim().toLowerCase()
+    const sort = pickString(url.searchParams.get('sort')) === 'likes' ? 'likes' : 'latest'
+    const filtered = galleryItems
+      .filter((item) => !query || item.prompt.toLowerCase().includes(query))
+      .filter((item) => !user || item.sharedByName.toLowerCase().includes(user))
+      .sort((left, right) => (
+        sort === 'likes'
+          ? right.likeCount - left.likeCount || Date.parse(right.createdAt) - Date.parse(left.createdAt)
+          : Date.parse(right.createdAt) - Date.parse(left.createdAt)
+      ))
+    const items = filtered.slice(offset, offset + limit)
+    const nextOffset = offset + items.length < filtered.length ? offset + items.length : null
     sendJson(res, 200, envelope({
       items,
       nextOffset,
@@ -321,6 +334,13 @@ async function handleMockRequest(
     requireMockAuth(req)
     const body = await readJsonBody(req)
     sendJson(res, 201, envelope(shareMockGalleryImage(body)))
+    return true
+  }
+
+  if ((method === 'POST' || method === 'DELETE') && /^\/api\/playground\/gallery\/[^/]+\/like$/.test(url.pathname)) {
+    requireMockAuth(req)
+    const galleryItemId = url.pathname.split('/')[4]
+    sendJson(res, 200, envelope(setMockGalleryLike(galleryItemId, method === 'POST')))
     return true
   }
 
@@ -927,6 +947,8 @@ function shareMockGalleryImage(body: JsonRecord): JsonRecord {
     sourceImageId: imageId,
     sharedByUserId: mockUser.id,
     sharedByName: mockUser.username,
+    likeCount: 0,
+    likedByViewer: false,
     createdAt: nowIso()
   }
   galleryItems.unshift(item)
@@ -934,6 +956,22 @@ function shareMockGalleryImage(body: JsonRecord): JsonRecord {
     item,
     alreadyExists: false
   }
+}
+
+function setMockGalleryLike(itemId: string, liked: boolean): MockGalleryItem {
+  const item = galleryItems.find((entry) => entry.id === itemId)
+  if (!item) {
+    throw httpError(404, 'Gallery item not found')
+  }
+  if (liked && !item.likedByViewer) {
+    item.likedByViewer = true
+    item.likeCount += 1
+  }
+  if (!liked && item.likedByViewer) {
+    item.likedByViewer = false
+    item.likeCount = Math.max(0, item.likeCount - 1)
+  }
+  return item
 }
 
 function normalizeMockFolder(value: unknown): string {
@@ -1165,6 +1203,8 @@ function seedGalleryItems(): MockGalleryItem[] {
       sourceImageId: `mock-gallery-image-${index + 1}`,
       sharedByUserId: mockUser.id,
       sharedByName: mockUser.username,
+      likeCount: 12 - index * 3,
+      likedByViewer: false,
       createdAt: new Date(Date.now() - index * 60 * 60 * 1000).toISOString()
     }
   })

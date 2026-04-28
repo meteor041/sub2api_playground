@@ -13,18 +13,20 @@ import {
   getImageTask,
   getProfile,
   hasAuthToken,
+  likeGalleryItem,
   listLibraryItems,
   listConversations,
   listApiKeys,
   listAvailableGroups,
   login,
   logout,
-  listGalleryItems,
+  queryGalleryItems,
   updateLibraryItem,
   saveConversationState,
   sendResponsesRequest,
   shareGalleryImage,
-  streamImageTask
+  streamImageTask,
+  unlikeGalleryItem
 } from './api'
 import type {
   ApiKey,
@@ -153,6 +155,10 @@ const galleryLoadingMore = ref(false)
 const galleryHasMore = ref(true)
 const galleryNextOffset = ref(0)
 const galleryColumnCount = ref(4)
+const galleryQuery = ref('')
+const galleryUserQuery = ref('')
+const gallerySort = ref<'latest' | 'likes'>('latest')
+const galleryLikeBusyId = ref('')
 const isMobileViewport = ref(false)
 const gallerySentinel = ref<HTMLElement | null>(null)
 const libraryBatchSize = 24
@@ -178,6 +184,7 @@ const librarySentinel = ref<HTMLElement | null>(null)
 let galleryObserver: IntersectionObserver | null = null
 let libraryObserver: IntersectionObserver | null = null
 let toastTimer: number | null = null
+let gallerySearchTimer: number | null = null
 let librarySearchTimer: number | null = null
 let conversationLoadRequestId = 0
 let pptAutoSaveTimer: number | null = null
@@ -922,6 +929,35 @@ function openStandaloneImageModal(image: StandalonePreviewImage): void {
 
 function handleGalleryImageError(event: Event, item: GalleryItem): void {
   handleImageError(event, galleryFallbackUrl(item))
+}
+
+function galleryRequestParams(offset = 0): {
+  offset: number
+  limit: number
+  query?: string
+  user?: string
+  sort: 'latest' | 'likes'
+} {
+  return {
+    offset,
+    limit: galleryBatchSize,
+    query: galleryQuery.value.trim() || undefined,
+    user: galleryUserQuery.value.trim() || undefined,
+    sort: gallerySort.value
+  }
+}
+
+function applyGalleryItemUpdate(item: GalleryItem): void {
+  galleryItems.value = galleryItems.value.map((current) => current.id === item.id ? item : current)
+  if (gallerySort.value === 'likes') {
+    galleryItems.value = [...galleryItems.value].sort((left, right) => (
+      right.likeCount - left.likeCount ||
+      new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+    ))
+  }
+  if (selectedGalleryItem.value?.id === item.id) {
+    selectedGalleryItem.value = item
+  }
 }
 
 function handleLibraryImageError(event: Event, item: LibraryItem): void {
@@ -2054,10 +2090,13 @@ async function refreshGallery(): Promise<void> {
   galleryNextOffset.value = 0
   galleryHasMore.value = true
   try {
-    const page = await listGalleryItems(0, galleryBatchSize)
+    const page = await queryGalleryItems(galleryRequestParams(0))
     galleryItems.value = page.items
     galleryNextOffset.value = page.nextOffset || galleryItems.value.length
     galleryHasMore.value = page.hasMore
+    if (selectedGalleryItem.value) {
+      selectedGalleryItem.value = page.items.find((item) => item.id === selectedGalleryItem.value?.id) || null
+    }
   } catch (error) {
     setError(error instanceof Error ? error.message : '加载公共画廊失败')
   } finally {
@@ -2075,7 +2114,7 @@ async function loadMoreGallery(): Promise<void> {
   }
   galleryLoadingMore.value = true
   try {
-    const page = await listGalleryItems(galleryNextOffset.value, galleryBatchSize)
+    const page = await queryGalleryItems(galleryRequestParams(galleryNextOffset.value))
     const existingIds = new Set(galleryItems.value.map((item) => item.id))
     galleryItems.value = [
       ...galleryItems.value,
@@ -2087,6 +2126,41 @@ async function loadMoreGallery(): Promise<void> {
     setError(error instanceof Error ? error.message : '加载更多画廊失败')
   } finally {
     galleryLoadingMore.value = false
+  }
+}
+
+function scheduleGalleryRefresh(): void {
+  if (gallerySearchTimer) {
+    window.clearTimeout(gallerySearchTimer)
+  }
+  gallerySearchTimer = window.setTimeout(() => {
+    gallerySearchTimer = null
+    void refreshGallery()
+  }, 260)
+}
+
+async function toggleSelectedGalleryLike(): Promise<void> {
+  const item = selectedGalleryItem.value
+  if (!item) {
+    return
+  }
+  if (!isAuthenticated.value) {
+    setError('请先登录后再点赞画廊图片。')
+    return
+  }
+  if (galleryLikeBusyId.value === item.id) {
+    return
+  }
+  galleryLikeBusyId.value = item.id
+  try {
+    const updated = item.likedByViewer
+      ? await unlikeGalleryItem(item.id)
+      : await likeGalleryItem(item.id)
+    applyGalleryItemUpdate(updated)
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '更新点赞失败')
+  } finally {
+    galleryLikeBusyId.value = ''
   }
 }
 
@@ -4297,6 +4371,12 @@ watch([libraryQuery, libraryFolderFilter, libraryTagFilter, libraryFavoriteOnly]
   }
 })
 
+watch([galleryQuery, galleryUserQuery, gallerySort], () => {
+  if (activeView.value === 'gallery') {
+    scheduleGalleryRefresh()
+  }
+})
+
 function makeMockSvg(bg: string, label: string): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512"><rect width="512" height="512" fill="${bg}"/><text x="256" y="256" dominant-baseline="middle" text-anchor="middle" font-family="sans-serif" font-size="26" fill="rgba(255,255,255,0.6)">${label}</text></svg>`
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
@@ -4363,6 +4443,9 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   clearToastTimer()
   clearPptAutoSaveTimer()
+  if (gallerySearchTimer) {
+    window.clearTimeout(gallerySearchTimer)
+  }
   if (librarySearchTimer) {
     window.clearTimeout(librarySearchTimer)
   }
@@ -4496,6 +4579,24 @@ onBeforeUnmount(() => {
 
     <section v-if="activeView === 'gallery'" class="page gallery-page">
       <header class="page-header gallery-toolbar">
+        <div class="gallery-filter-row">
+          <label class="gallery-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21 21-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Z" />
+            </svg>
+            <input v-model.trim="galleryQuery" type="search" placeholder="搜索关键词" />
+          </label>
+          <label class="gallery-search gallery-user-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 12a4 4 0 1 0-4-4 4 4 0 0 0 4 4Zm0 2c-4.42 0-8 1.79-8 4v2h16v-2c0-2.21-3.58-4-8-4Z" />
+            </svg>
+            <input v-model.trim="galleryUserQuery" type="search" placeholder="搜索用户" />
+          </label>
+          <select v-model="gallerySort" class="gallery-sort-select" title="排序方式">
+            <option value="latest">最新发布</option>
+            <option value="likes">点赞最多</option>
+          </select>
+        </div>
         <button
           class="ghost gallery-refresh-button"
           type="button"
@@ -6004,6 +6105,20 @@ onBeforeUnmount(() => {
                 </svg>
               </button>
               <button
+                v-if="selectedGalleryItem"
+                class="icon-button"
+                type="button"
+                :class="{ 'like-active': selectedGalleryItem.likedByViewer }"
+                :disabled="galleryLikeBusyId === selectedGalleryItem.id"
+                :aria-label="selectedGalleryItem.likedByViewer ? '取消点赞' : '点赞'"
+                :title="selectedGalleryItem.likedByViewer ? '取消点赞' : '点赞'"
+                @click="toggleSelectedGalleryLike"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m12 20.2-1.1-1C5.14 13.98 2 11.11 2 7.6 2 4.74 4.24 2.5 7.1 2.5c1.62 0 3.18.76 4.2 1.95 1.02-1.19 2.58-1.95 4.2-1.95C18.36 2.5 20.6 4.74 20.6 7.6c0 3.51-3.14 6.38-8.9 11.63l-1.1.97Z" />
+                </svg>
+              </button>
+              <button
                 v-if="selectedImage || selectedLibraryItem"
                 class="icon-button"
                 type="button"
@@ -6089,6 +6204,10 @@ onBeforeUnmount(() => {
             <div v-if="selectedLibraryItem" class="library-modal-meta">
               <span>{{ libraryFolderLabel(selectedLibraryItem.folder) }}</span>
               <span v-for="tag in selectedLibraryItem.tags" :key="`modal-${selectedLibraryItem.id}-${tag}`">#{{ tag }}</span>
+            </div>
+            <div v-if="selectedGalleryItem" class="gallery-modal-meta">
+              <span>{{ selectedGalleryItem.sharedByName || '匿名用户' }}</span>
+              <span>{{ selectedGalleryItem.likeCount }} 赞</span>
             </div>
           </div>
           <small>
