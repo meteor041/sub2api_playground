@@ -501,6 +501,113 @@ function parseUpstreamError(data, fallback) {
   return fallback
 }
 
+function imageRetryHint(data) {
+  const retryAfter = Number(data?.retry_after)
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return `建议至少 ${retryAfter} 秒后重试。`
+  }
+  return ''
+}
+
+function parseImageUpstreamError(data, statusCode, fallback) {
+  let normalizedData = data
+  if (typeof normalizedData === 'string') {
+    const trimmed = normalizedData.trim()
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        normalizedData = JSON.parse(trimmed)
+      } catch {
+        normalizedData = data
+      }
+    }
+  }
+
+  const generic = parseUpstreamError(normalizedData, fallback)
+  const message = typeof generic === 'string' ? generic.trim() : fallback
+  const detail = typeof normalizedData?.detail === 'string' ? normalizedData.detail.trim() : ''
+  const errorCode = Number(normalizedData?.error_code || 0)
+  const errorName = typeof normalizedData?.error_name === 'string' ? normalizedData.error_name.trim() : ''
+  const retryHint = imageRetryHint(normalizedData)
+  const lowerMessage = message.toLowerCase()
+  const lowerDetail = detail.toLowerCase()
+  const generationErrors = Array.isArray(normalizedData?.generation_errors) ? normalizedData.generation_errors : []
+
+  if (normalizedData?.supported === false && generationErrors.length > 0) {
+    const hasTransportInstability = generationErrors.some((item) => item?.reason === 'transport_instability')
+    const hasProxyTimeout = generationErrors.some((item) => item?.reason === 'proxy_incompatibility' || String(item?.error || '').includes('HTTP 504'))
+    if (hasTransportInstability && hasProxyTimeout) {
+      return '图片生成失败：上游图片接口连接不稳定，兜底路由也发生了 504 超时。请稍后重试。'
+    }
+    if (hasTransportInstability) {
+      return '图片生成失败：上游图片接口连接不稳定，请稍后重试。'
+    }
+    if (hasProxyTimeout) {
+      return `图片生成超时：上游代理链路返回 504。${retryHint || '请稍后重试。'}`
+    }
+  }
+
+  if (message === 'No available compatible accounts') {
+    return '图片生成失败：当前没有可用的兼容账号，请稍后重试或更换分组。'
+  }
+
+  if (
+    statusCode === 504 ||
+    errorCode === 504 ||
+    errorName === 'origin_gateway_timeout' ||
+    lowerMessage.includes('gateway time-out') ||
+    lowerMessage.includes('gateway timeout') ||
+    lowerDetail.includes('did not respond to cloudflare')
+  ) {
+    return `图片生成超时：上游源站响应过慢，Cloudflare 返回 504。${retryHint || '请稍后重试。'}`
+  }
+
+  if (statusCode === 429) {
+    return `图片生成请求过于频繁或额度受限。${retryHint || '请稍后重试。'}`
+  }
+
+  if (statusCode === 401 || statusCode === 403) {
+    return '图片生成失败：当前 API Key 或分组没有可用的图片权限。'
+  }
+
+  if (typeof message === 'string' && message) {
+    return message
+  }
+
+  return fallback
+}
+
+function classifyImageTransportError(error) {
+  const rawMessage = error instanceof Error ? error.message : String(error || '')
+  const message = rawMessage.trim()
+  const lower = message.toLowerCase()
+
+  if (
+    lower.includes('ssl') ||
+    lower.includes('tls') ||
+    lower.includes('unexpected eof while reading') ||
+    lower.includes('ssleoferror')
+  ) {
+    return '图片生成失败：上游 TLS/SSL 连接异常中断，请稍后重试。'
+  }
+
+  if (lower.includes('fetch failed') || lower.includes('econnreset') || lower.includes('socket hang up')) {
+    return '图片生成失败：上游连接不稳定，请稍后重试。'
+  }
+
+  if (lower.includes('timeout') || lower.includes('timed out')) {
+    return '图片生成超时：上游服务响应过慢，请稍后重试。'
+  }
+
+  return message || '图片生成失败：上游请求异常。'
+}
+
+function formatImageTaskError(error) {
+  if (error?.statusCode && error instanceof Error) {
+    return error.message
+  }
+  return classifyImageTransportError(error)
+}
+
 function normalizeImageResult(data, fallbackPrompt, fallbackSize) {
   const items = Array.isArray(data?.data) ? data.data : []
   const images = items
@@ -2254,7 +2361,10 @@ async function runImageTask(task) {
 
     if (!response.ok) {
       const data = await readResponseJson(response)
-      throw appError(response.status, parseUpstreamError(data, `Image request failed: HTTP ${response.status}`))
+      throw appError(
+        response.status,
+        parseImageUpstreamError(data, response.status, `图片生成失败：上游返回 HTTP ${response.status}`)
+      )
     }
 
     const contentType = response.headers.get('content-type') || ''
@@ -2272,7 +2382,7 @@ async function runImageTask(task) {
     await archiveImageTaskToConversation(task)
   } catch (error) {
     task.status = 'failed'
-    task.error = error instanceof Error ? error.message : 'Image task failed'
+    task.error = formatImageTaskError(error)
     task.updatedAt = nowIso()
     try {
       await archiveImageTaskToConversation(task)
