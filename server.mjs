@@ -201,6 +201,18 @@ function resolveRateLimitRule(req, url) {
     }
   }
 
+  if (
+    (req.method === 'POST' || req.method === 'DELETE') &&
+    /^\/api\/playground\/gallery\/[^/]+\/like$/.test(url.pathname)
+  ) {
+    return {
+      key: 'gallery-like',
+      limit: 30,
+      windowMs: 60 * 1000,
+      message: '点赞操作过于频繁，请稍后再试'
+    }
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/playground/ppt/export') {
     return {
       key: 'ppt-export',
@@ -307,6 +319,11 @@ async function ensureRuntime() {
   `)
 
   await db.query(`
+    ALTER TABLE playground_gallery_items
+    ADD COLUMN IF NOT EXISTS likes_count INTEGER NOT NULL DEFAULT 0
+  `)
+
+  await db.query(`
     DROP INDEX IF EXISTS idx_playground_gallery_source
   `)
 
@@ -325,6 +342,25 @@ async function ensureRuntime() {
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_playground_gallery_created
     ON playground_gallery_items (created_at DESC)
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_gallery_likes_count
+    ON playground_gallery_items (likes_count DESC, created_at DESC)
+  `)
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS playground_gallery_likes (
+      gallery_item_id UUID NOT NULL REFERENCES playground_gallery_items(id) ON DELETE CASCADE,
+      user_id BIGINT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (gallery_item_id, user_id)
+    )
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_gallery_likes_user
+    ON playground_gallery_likes (user_id, created_at DESC)
   `)
 
   await db.query(`
@@ -476,6 +512,14 @@ async function getAuthenticatedUser(req) {
   })
 
   return user
+}
+
+async function getOptionalAuthenticatedUser(req) {
+  const authorization = getAuthorization(req)
+  if (!authorization) {
+    return null
+  }
+  return getAuthenticatedUser(req)
 }
 
 function requireDb() {
@@ -3230,21 +3274,58 @@ function mapGalleryRow(row, req) {
     sourceImageId: row.source_image_id,
     sharedByUserId: Number(row.shared_by_user_id),
     sharedByName: row.shared_by_name || undefined,
+    likeCount: Number(row.likes_count || 0),
+    likedByViewer: Boolean(row.liked_by_viewer),
     createdAt: row.created_at
   }
 }
 
-async function listGalleryItems(req, limit, offset) {
+async function listGalleryItems(req, limit, offset, filters = {}, viewerId = null) {
   const pool = requireDb()
   const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || '2'), 10) || 2, 1), 12)
   const safeOffset = Math.max(Number.parseInt(String(offset || '0'), 10) || 0, 0)
+  const query = typeof filters.query === 'string' ? filters.query.trim() : ''
+  const user = typeof filters.user === 'string' ? filters.user.trim() : ''
+  const sort = filters.sort === 'likes' ? 'likes' : 'latest'
+  const where = []
+  const values = []
+
+  if (query) {
+    values.push(`%${query}%`)
+    const index = values.length
+    where.push(`g.prompt ILIKE $${index}`)
+  }
+
+  if (user) {
+    values.push(`%${user}%`)
+    const index = values.length
+    where.push(`COALESCE(g.shared_by_name, '') ILIKE $${index}`)
+  }
+
+  values.push(viewerId)
+  const viewerIndex = values.length
+  values.push(safeLimit + 1)
+  const limitIndex = values.length
+  values.push(safeOffset)
+  const offsetIndex = values.length
+  const whereClause = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+  const orderClause = sort === 'likes'
+    ? 'ORDER BY g.likes_count DESC, g.created_at DESC'
+    : 'ORDER BY g.created_at DESC'
   const result = await pool.query(
-    `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
-            shared_by_user_id, shared_by_name, created_at
-     FROM playground_gallery_items
-     ORDER BY created_at DESC
-     LIMIT $1 OFFSET $2`,
-    [safeLimit + 1, safeOffset]
+    `SELECT g.id, g.asset_token, g.remote_url, g.prompt, g.size, g.source_conversation_id, g.source_image_id,
+            g.shared_by_user_id, g.shared_by_name, g.likes_count, g.created_at,
+            EXISTS (
+              SELECT 1
+              FROM playground_gallery_likes gl
+              WHERE gl.gallery_item_id = g.id
+                AND gl.user_id = $${viewerIndex}
+            ) AS liked_by_viewer
+     FROM playground_gallery_items g
+     ${whereClause}
+     ${orderClause}
+     LIMIT $${limitIndex} OFFSET $${offsetIndex}`,
+    values
   )
   const hasMore = result.rows.length > safeLimit
   const items = result.rows.slice(0, safeLimit).map((row) => mapGalleryRow(row, req))
@@ -3289,7 +3370,8 @@ async function shareGalleryImage(user, body) {
   const pool = requireDb()
   const existing = await pool.query(
     `SELECT id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
-            shared_by_user_id, shared_by_name, created_at
+            shared_by_user_id, shared_by_name, likes_count, created_at,
+            false AS liked_by_viewer
      FROM playground_gallery_items
      WHERE shared_by_user_id = $1
        AND (($2::uuid IS NOT NULL AND asset_token = $2::uuid) OR ($3::text IS NOT NULL AND remote_url = $3::text))
@@ -3308,11 +3390,12 @@ async function shareGalleryImage(user, body) {
   const result = await pool.query(
     `INSERT INTO playground_gallery_items (
        id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
-       shared_by_user_id, shared_by_name, created_at, updated_at
+       shared_by_user_id, shared_by_name, likes_count, created_at, updated_at
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 0, NOW(), NOW())
      RETURNING id, asset_token, remote_url, prompt, size, source_conversation_id, source_image_id,
-               shared_by_user_id, shared_by_name, created_at`,
+               shared_by_user_id, shared_by_name, likes_count, created_at,
+               false AS liked_by_viewer`,
     [
       id,
       assetToken,
@@ -3330,6 +3413,69 @@ async function shareGalleryImage(user, body) {
     item: mapGalleryRow(row, { headers: {} }),
     alreadyExists: false
   }
+}
+
+async function setGalleryLike(req, user, galleryItemId, liked) {
+  const itemId = typeof galleryItemId === 'string' ? galleryItemId.trim() : ''
+  if (!itemId) {
+    throw appError(400, 'Gallery item ID is required')
+  }
+
+  const pool = requireDb()
+  const existing = await pool.query(
+    `SELECT id
+     FROM playground_gallery_items
+     WHERE id = $1
+     LIMIT 1`,
+    [itemId]
+  )
+  if (!existing.rows[0]) {
+    throw appError(404, 'Gallery item not found')
+  }
+
+  if (liked) {
+    await pool.query(
+      `INSERT INTO playground_gallery_likes (gallery_item_id, user_id, created_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (gallery_item_id, user_id) DO NOTHING`,
+      [itemId, user.id]
+    )
+  } else {
+    await pool.query(
+      `DELETE FROM playground_gallery_likes
+       WHERE gallery_item_id = $1 AND user_id = $2`,
+      [itemId, user.id]
+    )
+  }
+
+  await pool.query(
+    `UPDATE playground_gallery_items g
+     SET likes_count = (
+       SELECT COUNT(*)
+       FROM playground_gallery_likes gl
+       WHERE gl.gallery_item_id = g.id
+     ),
+     updated_at = NOW()
+     WHERE g.id = $1`,
+    [itemId]
+  )
+
+  const result = await pool.query(
+    `SELECT g.id, g.asset_token, g.remote_url, g.prompt, g.size, g.source_conversation_id, g.source_image_id,
+            g.shared_by_user_id, g.shared_by_name, g.likes_count, g.created_at,
+            EXISTS (
+              SELECT 1
+              FROM playground_gallery_likes gl
+              WHERE gl.gallery_item_id = g.id
+                AND gl.user_id = $2
+            ) AS liked_by_viewer
+     FROM playground_gallery_items g
+     WHERE g.id = $1
+     LIMIT 1`,
+    [itemId, user.id]
+  )
+
+  return mapGalleryRow(result.rows[0], req)
 }
 
 async function proxyRequest(req, res) {
@@ -3425,13 +3571,31 @@ const server = createServer(async (req, res) => {
     applyRateLimit(req, url)
 
     if (req.method === 'GET' && url.pathname === '/api/playground/gallery') {
-      const page = await listGalleryItems(req, url.searchParams.get('limit'), url.searchParams.get('offset'))
+      const user = await getOptionalAuthenticatedUser(req)
+      const page = await listGalleryItems(
+        req,
+        url.searchParams.get('limit'),
+        url.searchParams.get('offset'),
+        {
+          query: url.searchParams.get('query'),
+          user: url.searchParams.get('user'),
+          sort: url.searchParams.get('sort')
+        },
+        user?.id || null
+      )
       const body = JSON.stringify({ code: 0, message: 'success', data: page })
+      const cacheHeaders = user
+        ? {
+          'Cache-Control': 'private, no-store'
+        }
+        : {
+          'Cache-Control': 'public, max-age=30, s-maxage=300, stale-while-revalidate=600',
+          'CDN-Cache-Control': 'public, max-age=300, stale-while-revalidate=600'
+        }
       res.writeHead(200, {
-        'Cache-Control': 'public, max-age=30, s-maxage=300, stale-while-revalidate=600',
-        'CDN-Cache-Control': 'public, max-age=300, stale-while-revalidate=600',
         'Content-Length': Buffer.byteLength(body),
-        'Content-Type': 'application/json; charset=utf-8'
+        'Content-Type': 'application/json; charset=utf-8',
+        ...cacheHeaders
       })
       res.end(body)
       return
@@ -3442,6 +3606,14 @@ const server = createServer(async (req, res) => {
       const body = await parseJsonBody(req)
       const result = await shareGalleryImage(user, body)
       json(res, result.alreadyExists ? 200 : 201, { code: 0, message: 'success', data: result })
+      return
+    }
+
+    if ((req.method === 'POST' || req.method === 'DELETE') && /^\/api\/playground\/gallery\/[^/]+\/like$/.test(url.pathname)) {
+      const user = await getAuthenticatedUser(req)
+      const galleryItemId = url.pathname.split('/')[4]
+      const item = await setGalleryLike(req, user, galleryItemId, req.method === 'POST')
+      json(res, 200, { code: 0, message: 'success', data: item })
       return
     }
 

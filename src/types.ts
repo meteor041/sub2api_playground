@@ -97,6 +97,8 @@ export interface GalleryItem {
   sourceImageId: string
   sharedByUserId: number
   sharedByName?: string
+  likeCount: number
+  likedByViewer: boolean
   createdAt: string
 }
 

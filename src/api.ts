@@ -434,7 +434,29 @@ export async function streamImageTask(
 }
 
 export function listGalleryItems(offset = 0, limit = 2): Promise<GalleryPage> {
-  return request<GalleryPage>(`/api/playground/gallery?offset=${offset}&limit=${limit}`, {}, false)
+  return request<GalleryPage>(`/api/playground/gallery?offset=${offset}&limit=${limit}`)
+}
+
+export function queryGalleryItems(params: {
+  offset?: number
+  limit?: number
+  query?: string
+  user?: string
+  sort?: 'latest' | 'likes'
+} = {}): Promise<GalleryPage> {
+  const search = new URLSearchParams()
+  search.set('offset', String(params.offset || 0))
+  search.set('limit', String(params.limit || 2))
+  if (params.query?.trim()) {
+    search.set('query', params.query.trim())
+  }
+  if (params.user?.trim()) {
+    search.set('user', params.user.trim())
+  }
+  if (params.sort && params.sort !== 'latest') {
+    search.set('sort', params.sort)
+  }
+  return request<GalleryPage>(`/api/playground/gallery?${search.toString()}`)
 }
 
 export function shareGalleryImage(payload: {
@@ -451,6 +473,18 @@ export function shareGalleryImage(payload: {
       asset_token: payload.assetToken || null,
       remote_url: payload.remoteUrl || null
     })
+  })
+}
+
+export function likeGalleryItem(itemId: string): Promise<GalleryItem> {
+  return request<GalleryItem>(`/api/playground/gallery/${encodeURIComponent(itemId)}/like`, {
+    method: 'POST'
+  })
+}
+
+export function unlikeGalleryItem(itemId: string): Promise<GalleryItem> {
+  return request<GalleryItem>(`/api/playground/gallery/${encodeURIComponent(itemId)}/like`, {
+    method: 'DELETE'
   })
 }
 
