@@ -71,6 +71,7 @@ const imageSizeOptions = [
 ]
 const imageSizes = imageSizeOptions.map((option) => option.value)
 const maxImageToolCallsPerTurn = 1
+const MAIN_SITE_REGISTER_URL = 'https://meteo041.com'
 const ACTIVE_CREATE_CONVERSATION_KEY = 'playground_active_create_conversation_id'
 const ACTIVE_PPT_CONVERSATION_KEY = 'playground_active_ppt_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
@@ -4553,7 +4554,12 @@ onBeforeUnmount(() => {
           <div>
             <p class="eyebrow">Library</p>
             <h1>登录后管理个人作品库</h1>
-            <p>作品库会保存你生成过的图片，并支持搜索、标签、文件夹、收藏、删除和批量管理。</p>
+            <p>作品库会保存你生成过的图片，并支持搜索、标签、文件夹、收藏、删除和批量管理。还没有账号的话，请先去主站 meteo041.com 注册。</p>
+            <div class="login-card-actions">
+              <a class="login-register-link" :href="MAIN_SITE_REGISTER_URL" target="_blank" rel="noreferrer">
+                去主站注册
+              </a>
+            </div>
           </div>
           <form class="login-form" @submit.prevent="handleLogin">
             <label>
@@ -4777,7 +4783,12 @@ onBeforeUnmount(() => {
           <div>
             <p class="eyebrow">PPT</p>
             <h1>登录后开始规划 PPT</h1>
-            <p>选择模型和 API Key，输入内容、风格和设计要求，系统会拆解出统一风格的逐页制作方案。</p>
+            <p>选择模型和 API Key，输入内容、风格和设计要求，系统会拆解出统一风格的逐页制作方案。没有账号时，请先去主站 meteo041.com 注册。</p>
+            <div class="login-card-actions">
+              <a class="login-register-link" :href="MAIN_SITE_REGISTER_URL" target="_blank" rel="noreferrer">
+                去主站注册
+              </a>
+            </div>
           </div>
           <form class="login-form" @submit.prevent="handleLogin">
             <label>
@@ -5309,7 +5320,12 @@ onBeforeUnmount(() => {
           <div>
             <p class="eyebrow">Sign in</p>
             <h1>登录后开始创造</h1>
-            <p>使用现有 sub2api 账号登录后，Playground 会读取余额和 OpenAI 分组 API Key。</p>
+            <p>使用现有 sub2api 账号登录后，Playground 会读取余额和 OpenAI 分组 API Key。新用户请先前往主站 meteo041.com 注册。</p>
+            <div class="login-card-actions">
+              <a class="login-register-link" :href="MAIN_SITE_REGISTER_URL" target="_blank" rel="noreferrer">
+                去主站注册
+              </a>
+            </div>
           </div>
           <form class="login-form" @submit.prevent="handleLogin">
             <label>
