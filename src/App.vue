@@ -2636,8 +2636,9 @@ async function waitForImageTask(
     if (controller.signal.aborted) {
       throw error
     }
-    if (latestTask && (latestTask.status === 'completed' || latestTask.status === 'failed')) {
-      return latestTask
+    const streamedTask = latestTask
+    if (streamedTask && (streamedTask.status === 'completed' || streamedTask.status === 'failed')) {
+      return streamedTask
     }
     return pollImageTask(taskId, onStatus)
   } finally {
