@@ -55,7 +55,11 @@ function saveAuthTokens(data: LoginResponse): void {
 }
 
 function apiUrl(path: string): string {
-  return `${baseUrl}${path.startsWith('/') ? path : `/${path}`}`
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  if (normalizedPath.startsWith('/api/playground')) {
+    return normalizedPath
+  }
+  return `${baseUrl}${normalizedPath}`
 }
 
 async function readJson(response: Response): Promise<unknown> {
