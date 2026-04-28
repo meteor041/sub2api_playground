@@ -1,9 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { execFile } from 'node:child_process'
 import { createServer } from 'node:http'
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -1512,91 +1510,184 @@ function buildPptxTemplateFiles(title, slideCount) {
   }
 }
 
+const zipTextEncoder = new TextEncoder()
+
+function makeCrc32Table() {
+  const table = new Uint32Array(256)
+
+  for (let index = 0; index < 256; index += 1) {
+    let value = index
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1)
+    }
+    table[index] = value >>> 0
+  }
+
+  return table
+}
+
+const crc32Table = makeCrc32Table()
+
+function crc32(buffer) {
+  let value = 0xffffffff
+
+  for (const byte of buffer) {
+    value = crc32Table[(value ^ byte) & 0xff] ^ (value >>> 8)
+  }
+
+  return (value ^ 0xffffffff) >>> 0
+}
+
+function zipDateParts(date = new Date()) {
+  const year = Math.max(1980, date.getFullYear())
+  return {
+    time: ((date.getHours() & 0x1f) << 11) | ((date.getMinutes() & 0x3f) << 5) | ((Math.floor(date.getSeconds() / 2)) & 0x1f),
+    date: (((year - 1980) & 0x7f) << 9) | (((date.getMonth() + 1) & 0x0f) << 5) | (date.getDate() & 0x1f)
+  }
+}
+
+function normalizeZipEntryContent(content) {
+  if (Buffer.isBuffer(content)) {
+    return content
+  }
+  if (content instanceof Uint8Array) {
+    return Buffer.from(content)
+  }
+  return Buffer.from(String(content), 'utf8')
+}
+
+function buildZipBuffer(entries) {
+  const localChunks = []
+  const centralChunks = []
+  const { time, date } = zipDateParts()
+  let localOffset = 0
+
+  for (const entry of entries) {
+    const nameBuffer = zipTextEncoder.encode(entry.name)
+    const dataBuffer = normalizeZipEntryContent(entry.content)
+    const checksum = crc32(dataBuffer)
+
+    const localHeader = Buffer.alloc(30)
+    localHeader.writeUInt32LE(0x04034b50, 0)
+    localHeader.writeUInt16LE(20, 4)
+    localHeader.writeUInt16LE(0x0800, 6)
+    localHeader.writeUInt16LE(0, 8)
+    localHeader.writeUInt16LE(time, 10)
+    localHeader.writeUInt16LE(date, 12)
+    localHeader.writeUInt32LE(checksum, 14)
+    localHeader.writeUInt32LE(dataBuffer.length, 18)
+    localHeader.writeUInt32LE(dataBuffer.length, 22)
+    localHeader.writeUInt16LE(nameBuffer.length, 26)
+    localHeader.writeUInt16LE(0, 28)
+
+    localChunks.push(localHeader, nameBuffer, dataBuffer)
+
+    const centralHeader = Buffer.alloc(46)
+    centralHeader.writeUInt32LE(0x02014b50, 0)
+    centralHeader.writeUInt16LE(20, 4)
+    centralHeader.writeUInt16LE(20, 6)
+    centralHeader.writeUInt16LE(0x0800, 8)
+    centralHeader.writeUInt16LE(0, 10)
+    centralHeader.writeUInt16LE(time, 12)
+    centralHeader.writeUInt16LE(date, 14)
+    centralHeader.writeUInt32LE(checksum, 16)
+    centralHeader.writeUInt32LE(dataBuffer.length, 20)
+    centralHeader.writeUInt32LE(dataBuffer.length, 24)
+    centralHeader.writeUInt16LE(nameBuffer.length, 28)
+    centralHeader.writeUInt16LE(0, 30)
+    centralHeader.writeUInt16LE(0, 32)
+    centralHeader.writeUInt16LE(0, 34)
+    centralHeader.writeUInt16LE(0, 36)
+    centralHeader.writeUInt32LE(0, 38)
+    centralHeader.writeUInt32LE(localOffset, 42)
+
+    centralChunks.push(centralHeader, nameBuffer)
+    localOffset += localHeader.length + nameBuffer.length + dataBuffer.length
+  }
+
+  const centralDirectory = Buffer.concat(centralChunks)
+  const endRecord = Buffer.alloc(22)
+  endRecord.writeUInt32LE(0x06054b50, 0)
+  endRecord.writeUInt16LE(0, 4)
+  endRecord.writeUInt16LE(0, 6)
+  endRecord.writeUInt16LE(entries.length, 8)
+  endRecord.writeUInt16LE(entries.length, 10)
+  endRecord.writeUInt32LE(centralDirectory.length, 12)
+  endRecord.writeUInt32LE(localOffset, 16)
+  endRecord.writeUInt16LE(0, 20)
+
+  return Buffer.concat([...localChunks, centralDirectory, endRecord])
+}
+
 async function createPptxBuffer(userId, req, payload) {
   const { plan, slideImages } = normalizePptExportRequest(payload)
-  const tempRoot = await mkdtemp(path.join(tmpdir(), 'playground-pptx-'))
-  const packageRoot = path.join(tempRoot, 'package')
-  const outputPath = path.join(tempRoot, 'export.pptx')
+  const zipEntries = []
+  const templateFiles = buildPptxTemplateFiles(plan.projectTitle, plan.slides.length)
+  const imageExtensions = new Set()
 
-  try {
-    await mkdir(path.join(packageRoot, '_rels'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'docProps'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', '_rels'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', 'slides', '_rels'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', 'slideMasters', '_rels'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', 'slideLayouts', '_rels'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', 'theme'), { recursive: true })
-    await mkdir(path.join(packageRoot, 'ppt', 'media'), { recursive: true })
-
-    const templateFiles = buildPptxTemplateFiles(plan.projectTitle, plan.slides.length)
-    const imageExtensions = new Set()
-
-    for (const [relativePath, content] of Object.entries(templateFiles)) {
-      if (content === null) {
-        continue
-      }
-      const target = path.join(packageRoot, relativePath)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, content, 'utf8')
+  for (const [relativePath, content] of Object.entries(templateFiles)) {
+    if (content === null) {
+      continue
     }
-
-    for (let index = 0; index < plan.slides.length; index += 1) {
-      const slide = plan.slides[index]
-      const source = slide.slideImageId ? slideImages.get(slide.slideImageId) : ''
-      let mediaFileName = ''
-      let imageRelId = ''
-
-      if (source) {
-        try {
-          const image = await loadPptExportImage(userId, req, source)
-          if (image?.buffer?.length) {
-            const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
-            mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
-            imageRelId = 'rId2'
-            imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
-            await writeFile(path.join(packageRoot, 'ppt', 'media', mediaFileName), image.buffer)
-          }
-        } catch (error) {
-          console.warn(
-            `PPT export image skipped for user ${userId}, slide ${index + 1}:`,
-            error instanceof Error ? error.message : error
-          )
-        }
-      }
-
-      await writeFile(path.join(packageRoot, 'ppt', 'slides', `slide${index + 1}.xml`), buildSlideXml(slide, imageRelId), 'utf8')
-      await writeFile(
-        path.join(packageRoot, 'ppt', 'slides', '_rels', `slide${index + 1}.xml.rels`),
-        buildSlideRelsXml(imageRelId, mediaFileName),
-        'utf8'
-      )
-    }
-
-    await writeFile(path.join(packageRoot, '[Content_Types].xml'), buildContentTypesXml(plan.slides.length, imageExtensions), 'utf8')
-    await writeFile(path.join(packageRoot, 'ppt', 'presentation.xml'), buildPresentationXml(plan.slides.length), 'utf8')
-    await writeFile(path.join(packageRoot, 'ppt', '_rels', 'presentation.xml.rels'), buildPresentationRelsXml(plan.slides.length), 'utf8')
-
-    await new Promise((resolve, reject) => {
-      execFile(
-        'zip',
-        ['-qr', outputPath, '[Content_Types].xml', '_rels', 'docProps', 'ppt'],
-        { cwd: packageRoot },
-        (error) => {
-          if (error) {
-            reject(appError(500, 'Unable to package PPTX export'))
-            return
-          }
-          resolve()
-        }
-      )
+    zipEntries.push({
+      name: relativePath,
+      content
     })
+  }
 
-    return {
-      buffer: await readFile(outputPath),
-      filename: `${(plan.projectTitle || 'ppt-export').replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'ppt-export'}.pptx`
+  for (let index = 0; index < plan.slides.length; index += 1) {
+    const slide = plan.slides[index]
+    const source = slide.slideImageId ? slideImages.get(slide.slideImageId) : ''
+    let mediaFileName = ''
+    let imageRelId = ''
+
+    if (source) {
+      try {
+        const image = await loadPptExportImage(userId, req, source)
+        if (image?.buffer?.length) {
+          const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
+          mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
+          imageRelId = 'rId2'
+          imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
+          zipEntries.push({
+            name: `ppt/media/${mediaFileName}`,
+            content: image.buffer
+          })
+        }
+      } catch (error) {
+        console.warn(
+          `PPT export image skipped for user ${userId}, slide ${index + 1}:`,
+          error instanceof Error ? error.message : error
+        )
+      }
     }
-  } finally {
-    await rm(tempRoot, { recursive: true, force: true })
+
+    zipEntries.push({
+      name: `ppt/slides/slide${index + 1}.xml`,
+      content: buildSlideXml(slide, imageRelId)
+    })
+    zipEntries.push({
+      name: `ppt/slides/_rels/slide${index + 1}.xml.rels`,
+      content: buildSlideRelsXml(imageRelId, mediaFileName)
+    })
+  }
+
+  zipEntries.push({
+    name: '[Content_Types].xml',
+    content: buildContentTypesXml(plan.slides.length, imageExtensions)
+  })
+  zipEntries.push({
+    name: 'ppt/presentation.xml',
+    content: buildPresentationXml(plan.slides.length)
+  })
+  zipEntries.push({
+    name: 'ppt/_rels/presentation.xml.rels',
+    content: buildPresentationRelsXml(plan.slides.length)
+  })
+
+  return {
+    buffer: buildZipBuffer(zipEntries),
+    filename: `${(plan.projectTitle || 'ppt-export').replace(/[^\w\u4e00-\u9fa5-]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '') || 'ppt-export'}.pptx`
   }
 }
 
