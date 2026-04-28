@@ -1313,7 +1313,11 @@ ${buildPptTextParagraphs(lines, options)}
     </p:sp>`
 }
 
-function buildPptPicture(id, name, relId, x, y, cx, cy) {
+function buildPptPicture(id, name, relId, x, y, cx, cy, options = {}) {
+  const geometry = options.geometry || 'rect'
+  const line = options.line === false
+    ? '<a:ln><a:noFill/></a:ln>'
+    : '<a:ln w="12700"><a:solidFill><a:srgbClr val="D0D7E2"/></a:solidFill></a:ln>'
   return `    <p:pic>
       <p:nvPicPr>
         <p:cNvPr id="${id}" name="${escapeXml(name)}"/>
@@ -1326,55 +1330,19 @@ function buildPptPicture(id, name, relId, x, y, cx, cy) {
       </p:blipFill>
       <p:spPr>
         <a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm>
-        <a:prstGeom prst="roundRect"><a:avLst/></a:prstGeom>
-        <a:ln w="12700"><a:solidFill><a:srgbClr val="D0D7E2"/></a:solidFill></a:ln>
+        <a:prstGeom prst="${geometry}"><a:avLst/></a:prstGeom>
+        ${line}
       </p:spPr>
     </p:pic>`
 }
 
 function buildSlideXml(slide, imageRelId = '') {
-  const hasImage = Boolean(imageRelId)
-  const contentWidth = hasImage ? 5922000 : 10515600
-  const bodyLines = slide.keyPoints.length > 0
-    ? slide.keyPoints.map((item) => `• ${item}`)
-    : ['• 暂无要点']
-  const summaryLines = [
-    slide.objective,
-    slide.layout ? `版式：${slide.layout}` : '',
-    slide.visualDirection ? `视觉：${slide.visualDirection}` : ''
-  ].filter(Boolean)
-
   const shapes = [
-    buildPptTextBox(2, 'Title', 457200, 320040, 10515600, 762000, [slide.title], {
-      fontSize: 2600,
-      bold: true,
-      color: '172033'
-    }),
-    buildPptTextBox(3, 'Summary', 457200, 1219200, contentWidth, 1143000, summaryLines, {
-      fontSize: 1600,
-      fill: 'F6F8FB',
-      line: 'DDE5EF',
-      color: '334155',
-      bodyPr: 'wrap="square" rtlCol="0" anchor="ctr" lIns="182880" rIns="182880" tIns="121920" bIns="121920"'
-    }),
-    buildPptTextBox(4, 'Key Points', 457200, 2514600, contentWidth, 2540000, bodyLines, {
-      fontSize: 1800,
-      color: '111827'
-    }),
-    buildPptTextBox(5, 'Speaker Notes', 457200, 5257800, 10515600, 1097280, [
-      slide.speakerNotes || '讲述建议：按这一页的目标串联上下文，并聚焦一个主要信息点。'
-    ], {
-      fontSize: 1400,
-      fill: 'FFF4ED',
-      line: 'FDBA74',
-      color: '7C2D12',
-      bodyPr: 'wrap="square" rtlCol="0" anchor="t" lIns="182880" rIns="182880" tIns="121920" bIns="121920"'
+    buildPptPicture(2, slide.title || 'Slide Image', imageRelId, 0, 0, 12192000, 6858000, {
+      geometry: 'rect',
+      line: false
     })
   ]
-
-  if (hasImage) {
-    shapes.push(buildPptPicture(6, 'Slide Image', imageRelId, 6858000, 1219200, 4069080, 3048000))
-  }
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
@@ -1771,30 +1739,30 @@ async function createPptxBuffer(userId, req, payload) {
 
   for (let index = 0; index < plan.slides.length; index += 1) {
     const slide = plan.slides[index]
-    const source = slide.slideImageId ? slideImages.get(slide.slideImageId) : ''
+    const source = (
+      (slide.slideImageId ? slideImages.get(slide.slideImageId) : '') ||
+      (typeof slide.slideImageUrl === 'string' ? slide.slideImageUrl.trim() : '')
+    )
     let mediaFileName = ''
     let imageRelId = ''
 
-    if (source) {
-      try {
-        const image = await loadPptExportImage(userId, req, source)
-        if (image?.buffer?.length) {
-          const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
-          mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
-          imageRelId = 'rId2'
-          imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
-          zipEntries.push({
-            name: `ppt/media/${mediaFileName}`,
-            content: image.buffer
-          })
-        }
-      } catch (error) {
-        console.warn(
-          `PPT export image skipped for user ${userId}, slide ${index + 1}:`,
-          error instanceof Error ? error.message : error
-        )
-      }
+    if (!source) {
+      throw appError(400, `PPT 第 ${index + 1} 页缺少配图，当前导出仅支持整页图片 PPT。`)
     }
+
+    const image = await loadPptExportImage(userId, req, source)
+    if (!image?.buffer?.length) {
+      throw appError(400, `PPT 第 ${index + 1} 页配图无效，当前导出仅支持整页图片 PPT。`)
+    }
+
+    const ext = extFromMime(image.mimeType || 'image/png').replace(/^\./, '') || 'png'
+    mediaFileName = `image${index + 1}.${ext === 'jpeg' ? 'jpg' : ext}`
+    imageRelId = 'rId2'
+    imageExtensions.add(ext === 'jpeg' ? 'jpg' : ext)
+    zipEntries.push({
+      name: `ppt/media/${mediaFileName}`,
+      content: image.buffer
+    })
 
     zipEntries.push({
       name: `ppt/slides/slide${index + 1}.xml`,
