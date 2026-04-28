@@ -23,7 +23,8 @@ import {
   updateLibraryItem,
   saveConversationState,
   sendResponsesRequest,
-  shareGalleryImage
+  shareGalleryImage,
+  streamImageTask
 } from './api'
 import type {
   ApiKey,
@@ -419,6 +420,7 @@ const pptHeroTitle = computed(() => (
 ))
 
 const activePendingTaskIds = new Set<string>()
+const imageTaskStreamControllers = new Map<string, AbortController>()
 
 interface ResponseFunctionCall {
   type: 'function_call'
@@ -2594,7 +2596,7 @@ function mergeStreamingTaskImages(task: ImageTaskStatus): void {
   canvasImageIndex.value = -1
 }
 
-async function waitForImageTask(
+async function pollImageTask(
   taskId: string,
   onStatus?: (task: ImageTaskStatus) => void
 ): Promise<ImageTaskStatus> {
@@ -2611,6 +2613,38 @@ async function waitForImageTask(
   }
 
   throw new Error('生图任务轮询超时，请稍后刷新页面查看结果。')
+}
+
+async function waitForImageTask(
+  taskId: string,
+  onStatus?: (task: ImageTaskStatus) => void
+): Promise<ImageTaskStatus> {
+  const existingController = imageTaskStreamControllers.get(taskId)
+  existingController?.abort()
+
+  const controller = new AbortController()
+  imageTaskStreamControllers.set(taskId, controller)
+
+  let latestTask: ImageTaskStatus | null = null
+  try {
+    const task = await streamImageTask(taskId, (nextTask) => {
+      latestTask = nextTask
+      onStatus?.(nextTask)
+    }, controller.signal)
+    return task
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw error
+    }
+    if (latestTask && (latestTask.status === 'completed' || latestTask.status === 'failed')) {
+      return latestTask
+    }
+    return pollImageTask(taskId, onStatus)
+  } finally {
+    if (imageTaskStreamControllers.get(taskId) === controller) {
+      imageTaskStreamControllers.delete(taskId)
+    }
+  }
 }
 
 function buildImageTaskPayload(
@@ -4304,6 +4338,10 @@ onBeforeUnmount(() => {
   }
   galleryObserver?.disconnect()
   libraryObserver?.disconnect()
+  for (const controller of imageTaskStreamControllers.values()) {
+    controller.abort()
+  }
+  imageTaskStreamControllers.clear()
   window.removeEventListener('resize', syncViewportLayout)
 })
 </script>

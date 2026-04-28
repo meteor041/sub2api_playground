@@ -32,6 +32,7 @@ const assetsRoot = path.join(dataRoot, 'assets')
 const taskRetentionMs = 60 * 60 * 1000
 const taskHardTTLms = 6 * 60 * 60 * 1000
 const tasks = new Map()
+const taskStreamSubscribers = new Map()
 const authUserCache = new Map()
 const authUserCacheTtlMs = 60 * 1000
 const rateLimitHits = new Map()
@@ -87,6 +88,31 @@ function json(res, statusCode, payload, extraHeaders = {}) {
     ...extraHeaders
   })
   res.end(body)
+}
+
+function taskSubscribers(taskId) {
+  let subscribers = taskStreamSubscribers.get(taskId)
+  if (!subscribers) {
+    subscribers = new Set()
+    taskStreamSubscribers.set(taskId, subscribers)
+  }
+  return subscribers
+}
+
+function removeTaskStreamSubscriber(taskId, subscriber) {
+  const subscribers = taskStreamSubscribers.get(taskId)
+  if (!subscribers) {
+    return
+  }
+  subscribers.delete(subscriber)
+  if (subscribers.size === 0) {
+    taskStreamSubscribers.delete(taskId)
+  }
+}
+
+function writeSseEvent(res, eventName, payload) {
+  res.write(`event: ${eventName}\n`)
+  res.write(`data: ${JSON.stringify(payload)}\n\n`)
 }
 
 function appError(statusCode, message) {
@@ -676,6 +702,7 @@ async function processImageStreamResponse(response, task) {
     task.status = 'processing'
     task.updatedAt = nowIso()
     await updatePersistedImageTask(task)
+    broadcastTaskUpdate(task, 'task.preview')
   }
 
   while (true) {
@@ -1995,6 +2022,40 @@ function buildTaskResponse(task) {
   }
 }
 
+function resolveTaskStreamEventName(task) {
+  if (task.status === 'failed') {
+    return 'task.failed'
+  }
+  if (task.status === 'completed') {
+    return 'task.complete'
+  }
+  if (task.result?.raw && typeof task.result.raw === 'object' && task.result.raw.stream && Array.isArray(task.result.images) && task.result.images.length > 0) {
+    return 'task.preview'
+  }
+  return 'task.status'
+}
+
+function broadcastTaskUpdate(task, eventName = resolveTaskStreamEventName(task)) {
+  const subscribers = taskStreamSubscribers.get(task.id)
+  if (!subscribers || subscribers.size === 0) {
+    return
+  }
+  const payload = {
+    task: buildTaskResponse(task)
+  }
+  for (const subscriber of [...subscribers]) {
+    try {
+      writeSseEvent(subscriber.res, eventName, payload)
+      if (eventName === 'task.complete' || eventName === 'task.failed') {
+        subscriber.res.end()
+        subscriber.cleanup()
+      }
+    } catch {
+      subscriber.cleanup()
+    }
+  }
+}
+
 function mapTaskRow(row) {
   return {
     id: row.id,
@@ -2180,6 +2241,7 @@ async function runImageTask(task) {
   task.status = 'processing'
   task.updatedAt = nowIso()
   await updatePersistedImageTask(task)
+  broadcastTaskUpdate(task, 'task.status')
 
   try {
     const response = await callImageUpstream(task)
@@ -2213,6 +2275,7 @@ async function runImageTask(task) {
     }
   }
   await updatePersistedImageTask(task)
+  broadcastTaskUpdate(task)
 }
 
 async function createImageTask(body, userId) {
@@ -2256,6 +2319,7 @@ async function createImageTask(body, userId) {
 
   tasks.set(id, task)
   await insertPersistedImageTask(task)
+  broadcastTaskUpdate(task, 'task.status')
   void runImageTask(task)
   return task
 }
@@ -2285,6 +2349,57 @@ async function resumePersistedImageTasks() {
     tasks.set(task.id, task)
     void runImageTask(task)
   }
+}
+
+async function openImageTaskStream(req, res, taskId, userId) {
+  const task = taskId ? (tasks.get(taskId) || await getPersistedImageTask(taskId)) : null
+  if (!task || task.userId !== userId) {
+    throw appError(404, 'Task not found')
+  }
+
+  res.writeHead(200, {
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'X-Accel-Buffering': 'no'
+  })
+
+  let heartbeat = null
+  const subscriber = {
+    res,
+    cleanup: () => {}
+  }
+  const cleanup = () => {
+    if (heartbeat) {
+      clearInterval(heartbeat)
+    }
+    removeTaskStreamSubscriber(task.id, subscriber)
+  }
+  subscriber.cleanup = cleanup
+
+  req.on('close', cleanup)
+  req.on('error', cleanup)
+  res.on('close', cleanup)
+  res.on('error', cleanup)
+
+  writeSseEvent(res, resolveTaskStreamEventName(task), {
+    task: buildTaskResponse(task)
+  })
+
+  if (task.status === 'completed' || task.status === 'failed') {
+    res.end()
+    cleanup()
+    return
+  }
+
+  taskSubscribers(task.id).add(subscriber)
+  heartbeat = setInterval(() => {
+    try {
+      res.write(': ping\n\n')
+    } catch {
+      cleanup()
+    }
+  }, 15000)
 }
 
 function cleanupTasks() {
@@ -3391,6 +3506,13 @@ const server = createServer(async (req, res) => {
           status: task.status
         }
       })
+      return
+    }
+
+    if (req.method === 'GET' && /^\/api\/playground\/tasks\/[^/]+\/stream$/.test(url.pathname)) {
+      const user = await getAuthenticatedUser(req)
+      const taskId = url.pathname.split('/')[4]
+      await openImageTaskStream(req, res, taskId, user.id)
       return
     }
 

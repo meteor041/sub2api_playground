@@ -219,7 +219,12 @@ function extractStreamDelta(event: Record<string, any>): string {
   return ''
 }
 
-function parseSSEBlock(block: string): { data: unknown; delta: string } | null {
+function parseSSEBlock(block: string): { event: string; data: unknown; delta: string } | null {
+  const eventName = block
+    .split('\n')
+    .filter((line) => line.startsWith('event:'))
+    .map((line) => line.slice(6).trim())
+    .find(Boolean) || 'message'
   const dataLines = block
     .split('\n')
     .filter((line) => line.startsWith('data:'))
@@ -238,11 +243,12 @@ function parseSSEBlock(block: string): { data: unknown; delta: string } | null {
     const data = JSON.parse(raw)
     if (data && typeof data === 'object') {
       return {
+        event: eventName,
         data,
         delta: extractStreamDelta(data as Record<string, any>)
       }
     }
-    return { data, delta: '' }
+    return { event: eventName, data, delta: '' }
   } catch {
     return null
   }
@@ -351,6 +357,76 @@ export function createImageTask(
 
 export function getImageTask(taskId: string): Promise<ImageTaskStatus> {
   return request<ImageTaskStatus>(`/api/playground/tasks/${encodeURIComponent(taskId)}`)
+}
+
+export async function streamImageTask(
+  taskId: string,
+  onTask: (task: ImageTaskStatus, eventName: string) => void,
+  signal?: AbortSignal
+): Promise<ImageTaskStatus> {
+  const headers = new Headers()
+  const token = getAccessToken()
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`)
+  }
+
+  const response = await fetch(apiUrl(`/api/playground/tasks/${encodeURIComponent(taskId)}/stream`), {
+    method: 'GET',
+    headers,
+    signal
+  })
+  const contentType = response.headers.get('Content-Type') || ''
+  if (!response.ok || !response.body || !contentType.includes('text/event-stream')) {
+    const data = await readJson(response)
+    if (!response.ok) {
+      throw new Error(extractError(data, `Image stream failed: HTTP ${response.status}`))
+    }
+    throw new Error('Image stream is unavailable')
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let latestTask: ImageTaskStatus | null = null
+
+  const emitTask = (block: string) => {
+    const parsed = parseSSEBlock(block)
+    if (!parsed || !parsed.data || typeof parsed.data !== 'object') {
+      return
+    }
+    const payload = parsed.data as Record<string, unknown>
+    if (!payload.task || typeof payload.task !== 'object') {
+      return
+    }
+    latestTask = payload.task as ImageTaskStatus
+    onTask(latestTask, parsed.event)
+  }
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (value) {
+      buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n')
+      let separatorIndex = buffer.indexOf('\n\n')
+      while (separatorIndex >= 0) {
+        const block = buffer.slice(0, separatorIndex)
+        buffer = buffer.slice(separatorIndex + 2)
+        emitTask(block)
+        separatorIndex = buffer.indexOf('\n\n')
+      }
+    }
+    if (done) {
+      break
+    }
+  }
+
+  if (buffer.trim()) {
+    emitTask(buffer)
+  }
+
+  if (latestTask) {
+    return latestTask
+  }
+  throw new Error('Image stream closed without task updates')
 }
 
 export function listGalleryItems(offset = 0, limit = 2): Promise<GalleryPage> {
