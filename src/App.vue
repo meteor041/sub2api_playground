@@ -6257,7 +6257,6 @@ onBeforeUnmount(() => {
               @change="handleSpriteReferenceUpload"
             />
             <section class="sprite-preview-stage">
-              <h3>预览</h3>
               <div class="sprite-preview-canvas" :class="{ empty: !currentSpritePreviewImage }">
                 <img
                   v-if="currentSpritePreviewImage"
