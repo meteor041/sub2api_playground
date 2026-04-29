@@ -1,7 +1,9 @@
+import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { createServer } from 'node:http'
 import { createReadStream, existsSync } from 'node:fs'
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
@@ -33,9 +35,16 @@ const taskRetentionMs = 60 * 60 * 1000
 const taskHardTTLms = 6 * 60 * 60 * 1000
 const tasks = new Map()
 const taskStreamSubscribers = new Map()
+const sshChallenges = new Map()
+const sshSessions = new Map()
 const authUserCache = new Map()
 const authUserCacheTtlMs = 60 * 1000
 const rateLimitHits = new Map()
+const sshSignatureNamespace = 'sub2api-playground'
+const sshChallengeTtlMs = 5 * 60 * 1000
+const sshSessionTtlMs = 12 * 60 * 60 * 1000
+const maxSshPublicKeyLength = 16 * 1024
+const maxSshSignatureLength = 16 * 1024
 
 const db = process.env.DATABASE_URL
   ? new Pool({
@@ -162,6 +171,33 @@ function resolveRateLimitRule(req, url) {
   if (req.method === 'POST' && url.pathname === '/api/playground/tasks') {
     return {
       key: 'task-create',
+      limit: 12,
+      windowMs: 10 * 1000,
+      message: '创建图片任务过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && (url.pathname === '/api/playground/ssh/challenge' || url.pathname === '/api/playground/ssh/login')) {
+    return {
+      key: 'ssh-auth',
+      limit: 20,
+      windowMs: 60 * 1000,
+      message: 'SSH 认证请求过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/playground/ssh-keys') {
+    return {
+      key: 'ssh-key-bind',
+      limit: 10,
+      windowMs: 60 * 1000,
+      message: 'SSH 公钥绑定请求过于频繁，请稍后再试'
+    }
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/playground/ssh/tasks') {
+    return {
+      key: 'ssh-task-create',
       limit: 12,
       windowMs: 10 * 1000,
       message: '创建图片任务过于频繁，请稍后再试'
@@ -435,6 +471,28 @@ async function ensureRuntime() {
     CREATE INDEX IF NOT EXISTS idx_playground_image_tasks_status
     ON playground_image_tasks (status, archived)
   `)
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS playground_ssh_keys (
+      id UUID PRIMARY KEY,
+      user_id BIGINT NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      public_key TEXT NOT NULL,
+      fingerprint TEXT NOT NULL UNIQUE,
+      key_type TEXT NOT NULL,
+      api_key TEXT NOT NULL,
+      api_key_id BIGINT,
+      api_key_name TEXT,
+      last_used_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_ssh_keys_user_updated
+    ON playground_ssh_keys (user_id, updated_at DESC)
+  `)
 }
 
 function parseJsonBody(req) {
@@ -520,6 +578,394 @@ async function getOptionalAuthenticatedUser(req) {
     return null
   }
   return getAuthenticatedUser(req)
+}
+
+function sshFingerprintFromBlob(blob) {
+  return `SHA256:${createHash('sha256').update(blob).digest('base64').replace(/=+$/, '')}`
+}
+
+function normalizeSshPublicKey(value) {
+  const raw = String(value || '').trim().replace(/\r?\n/g, ' ')
+  if (raw.length > maxSshPublicKeyLength) {
+    throw appError(400, 'SSH public key is too large')
+  }
+  const parts = raw.split(/\s+/).filter(Boolean)
+  if (parts.length < 2) {
+    throw appError(400, 'SSH public key is required')
+  }
+
+  const keyType = parts[0]
+  const keyData = parts[1]
+  const allowedKeyTypes = new Set([
+    'ssh-ed25519',
+    'ssh-rsa',
+    'ecdsa-sha2-nistp256',
+    'ecdsa-sha2-nistp384',
+    'ecdsa-sha2-nistp521',
+    'sk-ssh-ed25519@openssh.com',
+    'sk-ecdsa-sha2-nistp256@openssh.com'
+  ])
+  if (!allowedKeyTypes.has(keyType)) {
+    throw appError(400, 'Unsupported SSH public key type')
+  }
+  if (!/^[A-Za-z0-9+/=]+$/.test(keyData)) {
+    throw appError(400, 'Invalid SSH public key data')
+  }
+
+  const blob = Buffer.from(keyData, 'base64')
+  const normalizedData = blob.toString('base64').replace(/=+$/, '')
+  if (blob.length < 32 || normalizedData !== keyData.replace(/=+$/, '')) {
+    throw appError(400, 'Invalid SSH public key data')
+  }
+
+  const comment = parts.slice(2).join(' ').slice(0, 160)
+  return {
+    keyType,
+    keyData,
+    comment,
+    fingerprint: sshFingerprintFromBlob(blob),
+    publicKey: `${keyType} ${keyData}${comment ? ` ${comment}` : ''}`
+  }
+}
+
+function mapSshKeyRow(row) {
+  return {
+    id: row.id,
+    name: row.name || '',
+    fingerprint: row.fingerprint,
+    key_type: row.key_type,
+    api_key_id: row.api_key_id == null ? null : Number(row.api_key_id),
+    api_key_name: row.api_key_name || '',
+    created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    updated_at: row.updated_at instanceof Date ? row.updated_at.toISOString() : row.updated_at,
+    last_used_at: row.last_used_at instanceof Date ? row.last_used_at.toISOString() : row.last_used_at
+  }
+}
+
+async function listUpstreamApiKeys(authorization) {
+  const response = await fetch(`${upstream}/api/v1/keys?page=1&page_size=100`, {
+    headers: {
+      Authorization: authorization
+    }
+  })
+  const data = await readResponseJson(response)
+  if (!response.ok) {
+    throw appError(response.status, parseUpstreamError(data, `Unable to load API keys: HTTP ${response.status}`))
+  }
+  const payload = data?.data && typeof data.data === 'object' ? data.data : data
+  return Array.isArray(payload?.items) ? payload.items : []
+}
+
+async function resolveSshApiKey(req, body) {
+  const apiKey = typeof body?.api_key === 'string' ? body.api_key.trim() : ''
+  if (!apiKey) {
+    throw appError(400, 'api_key is required')
+  }
+
+  const authorization = getAuthorization(req)
+  const hasApiKeyId = body?.api_key_id != null && body.api_key_id !== ''
+  const apiKeyId = hasApiKeyId ? Number(body.api_key_id) : NaN
+  const apiKeys = await listUpstreamApiKeys(authorization)
+  const matched = apiKeys.find((item) => (
+    typeof item?.key === 'string' &&
+    item.key === apiKey &&
+    (!Number.isFinite(apiKeyId) || Number(item?.id) === apiKeyId)
+  ))
+
+  if (!matched) {
+    throw appError(403, 'Selected API key does not belong to the authenticated user')
+  }
+  if (matched.status !== 'active' || matched.group?.platform !== 'openai') {
+    throw appError(400, 'Selected API key must be an active OpenAI group key')
+  }
+
+  return {
+    apiKey,
+    apiKeyId: Number.isFinite(Number(matched.id)) ? Number(matched.id) : null,
+    apiKeyName: typeof matched.name === 'string' && matched.name.trim()
+      ? matched.name.trim()
+      : (typeof body?.api_key_name === 'string' ? body.api_key_name.trim() : '')
+  }
+}
+
+async function listSshKeys(userId) {
+  const pool = requireDb()
+  const result = await pool.query(
+    `SELECT id, name, fingerprint, key_type, api_key_id, api_key_name, created_at, updated_at, last_used_at
+     FROM playground_ssh_keys
+     WHERE user_id = $1
+     ORDER BY updated_at DESC`,
+    [userId]
+  )
+  return result.rows.map(mapSshKeyRow)
+}
+
+async function upsertSshKey(req, user, body) {
+  const normalizedKey = normalizeSshPublicKey(body?.public_key)
+  const { apiKey, apiKeyId, apiKeyName } = await resolveSshApiKey(req, body)
+  const name = typeof body?.name === 'string' && body.name.trim()
+    ? body.name.trim().slice(0, 80)
+    : (normalizedKey.comment || normalizedKey.fingerprint)
+  const pool = requireDb()
+
+  const existing = await pool.query(
+    `SELECT id, user_id
+     FROM playground_ssh_keys
+     WHERE fingerprint = $1`,
+    [normalizedKey.fingerprint]
+  )
+  if (existing.rows[0] && Number(existing.rows[0].user_id) !== Number(user.id)) {
+    throw appError(409, 'This SSH public key is already bound to another account')
+  }
+
+  const id = existing.rows[0]?.id || randomUUID()
+  const result = await pool.query(
+    `INSERT INTO playground_ssh_keys (
+       id, user_id, name, public_key, fingerprint, key_type, api_key, api_key_id, api_key_name, created_at, updated_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+     ON CONFLICT (fingerprint) DO UPDATE
+       SET name = EXCLUDED.name,
+           public_key = EXCLUDED.public_key,
+           key_type = EXCLUDED.key_type,
+           api_key = EXCLUDED.api_key,
+           api_key_id = EXCLUDED.api_key_id,
+           api_key_name = EXCLUDED.api_key_name,
+           updated_at = NOW()
+     RETURNING id, name, fingerprint, key_type, api_key_id, api_key_name, created_at, updated_at, last_used_at`,
+    [
+      id,
+      user.id,
+      name,
+      normalizedKey.publicKey,
+      normalizedKey.fingerprint,
+      normalizedKey.keyType,
+      apiKey,
+      apiKeyId,
+      apiKeyName
+    ]
+  )
+  return mapSshKeyRow(result.rows[0])
+}
+
+async function deleteSshKey(userId, keyId) {
+  const pool = requireDb()
+  const result = await pool.query(
+    `DELETE FROM playground_ssh_keys
+     WHERE user_id = $1 AND id = $2`,
+    [userId, keyId]
+  )
+  return { deleted: result.rowCount || 0 }
+}
+
+async function getSshKeyByFingerprint(fingerprint) {
+  const pool = requireDb()
+  const result = await pool.query(
+    `SELECT id, user_id, name, public_key, fingerprint, key_type, api_key, api_key_id, api_key_name,
+            created_at, updated_at, last_used_at
+     FROM playground_ssh_keys
+     WHERE fingerprint = $1`,
+    [fingerprint]
+  )
+  return result.rows[0] || null
+}
+
+function cleanupSshAuthMaps() {
+  const now = Date.now()
+  for (const [id, challenge] of sshChallenges.entries()) {
+    if (challenge.expiresAt <= now) {
+      sshChallenges.delete(id)
+    }
+  }
+  for (const [token, session] of sshSessions.entries()) {
+    if (session.expiresAt <= now) {
+      sshSessions.delete(token)
+    }
+  }
+}
+
+async function createSshChallenge(body) {
+  const normalizedKey = normalizeSshPublicKey(body?.public_key)
+  const storedKey = await getSshKeyByFingerprint(normalizedKey.fingerprint)
+  if (!storedKey) {
+    throw appError(404, 'SSH public key is not registered')
+  }
+
+  const id = randomUUID()
+  const createdAt = nowIso()
+  const message = [
+    'sub2api-playground ssh login',
+    `challenge=${id}`,
+    `fingerprint=${normalizedKey.fingerprint}`,
+    `created_at=${createdAt}`,
+    ''
+  ].join('\n')
+
+  sshChallenges.set(id, {
+    id,
+    fingerprint: normalizedKey.fingerprint,
+    message,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + sshChallengeTtlMs
+  })
+
+  return {
+    challenge_id: id,
+    fingerprint: normalizedKey.fingerprint,
+    namespace: sshSignatureNamespace,
+    message,
+    expires_in: Math.floor(sshChallengeTtlMs / 1000)
+  }
+}
+
+function runProcessWithInput(command, args, input, timeoutMs = 60000) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
+    })
+    let stdout = ''
+    let stderr = ''
+    let settled = false
+    let timeout = null
+    const settle = (handler, value) => {
+      if (settled) {
+        return
+      }
+      settled = true
+      if (timeout) {
+        clearTimeout(timeout)
+      }
+      handler(value)
+    }
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8')
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8')
+    })
+    timeout = setTimeout(() => {
+      child.kill('SIGKILL')
+      const error = appError(408, 'SSH signature verification timed out')
+      settle(reject, error)
+    }, timeoutMs)
+    child.on('error', (error) => {
+      settle(reject, error)
+    })
+    child.on('close', (code) => {
+      settle(resolve, { code, stdout, stderr })
+    })
+    child.stdin.end(input)
+  })
+}
+
+async function verifySshSignature(publicKey, fingerprint, signature, message) {
+  const trimmedSignature = String(signature || '').trim()
+  if (trimmedSignature.length > maxSshSignatureLength) {
+    throw appError(400, 'SSH signature is too large')
+  }
+  if (!trimmedSignature.includes('BEGIN SSH SIGNATURE')) {
+    throw appError(400, 'SSH signature is required')
+  }
+
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'sub2api-ssh-'))
+  const allowedSignersPath = path.join(tempDir, 'allowed_signers')
+  const signaturePath = path.join(tempDir, 'signature.sig')
+  try {
+    await writeFile(allowedSignersPath, `${fingerprint} ${publicKey}\n`, 'utf8')
+    await writeFile(signaturePath, `${trimmedSignature}\n`, 'utf8')
+    const result = await runProcessWithInput('ssh-keygen', [
+      '-Y',
+      'verify',
+      '-f',
+      allowedSignersPath,
+      '-I',
+      fingerprint,
+      '-n',
+      sshSignatureNamespace,
+      '-s',
+      signaturePath
+    ], message)
+    if (result.code !== 0) {
+      throw appError(401, 'SSH signature verification failed')
+    }
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw appError(500, 'ssh-keygen is required for SSH authentication')
+    }
+    throw error
+  } finally {
+    await rm(tempDir, { recursive: true, force: true })
+  }
+}
+
+async function loginWithSsh(body) {
+  const normalizedKey = normalizeSshPublicKey(body?.public_key)
+  const challengeId = typeof body?.challenge_id === 'string' ? body.challenge_id.trim() : ''
+  const challenge = challengeId ? sshChallenges.get(challengeId) : null
+  if (!challenge || challenge.expiresAt <= Date.now()) {
+    throw appError(401, 'SSH challenge is expired or unknown')
+  }
+  if (challenge.fingerprint !== normalizedKey.fingerprint) {
+    throw appError(401, 'SSH challenge does not match this public key')
+  }
+
+  const storedKey = await getSshKeyByFingerprint(normalizedKey.fingerprint)
+  if (!storedKey) {
+    throw appError(404, 'SSH public key is not registered')
+  }
+
+  sshChallenges.delete(challengeId)
+  await verifySshSignature(storedKey.public_key, storedKey.fingerprint, body?.signature, challenge.message)
+
+  const token = `ssh_${randomUUID().replace(/-/g, '')}${randomUUID().replace(/-/g, '')}`
+  const expiresAt = Date.now() + sshSessionTtlMs
+  sshSessions.set(token, {
+    token,
+    userId: Number(storedKey.user_id),
+    sshKeyId: storedKey.id,
+    apiKey: storedKey.api_key,
+    apiKeyId: storedKey.api_key_id == null ? null : Number(storedKey.api_key_id),
+    apiKeyName: storedKey.api_key_name || '',
+    expiresAt
+  })
+
+  const pool = requireDb()
+  await pool.query(
+    `UPDATE playground_ssh_keys
+     SET last_used_at = NOW(), updated_at = NOW()
+     WHERE id = $1`,
+    [storedKey.id]
+  )
+
+  return {
+    access_token: token,
+    token_type: 'Bearer',
+    expires_in: Math.floor(sshSessionTtlMs / 1000),
+    user: {
+      id: Number(storedKey.user_id)
+    },
+    ssh_key: mapSshKeyRow({
+      ...storedKey,
+      last_used_at: nowIso(),
+      updated_at: nowIso()
+    })
+  }
+}
+
+function getSshSession(req) {
+  const authorization = getAuthorization(req)
+  const match = /^Bearer\s+(.+)$/i.exec(authorization)
+  const token = match ? match[1].trim() : ''
+  const session = token ? sshSessions.get(token) : null
+  if (!session || session.expiresAt <= Date.now()) {
+    if (token) {
+      sshSessions.delete(token)
+    }
+    throw appError(401, 'SSH login is required')
+  }
+  return session
 }
 
 function requireDb() {
@@ -1950,7 +2396,9 @@ function normalizeTaskPayload(payload) {
   const mode = payload?.mode === 'edit' ? 'edit' : 'generate'
   const prompt = typeof payload?.prompt === 'string' ? payload.prompt.trim() : ''
   const size = typeof payload?.size === 'string' ? payload.size.trim() : ''
-  const model = typeof payload?.model === 'string' ? payload.model.trim() : ''
+  const rawModel = typeof payload?.model === 'string' ? payload.model.trim() : ''
+  const model = ['image2', 'image-gpt-2', 'gpt-image-2'].includes(rawModel.toLowerCase()) ? 'gpt-image-2' : rawModel
+  const quality = typeof payload?.quality === 'string' ? payload.quality.trim() : ''
   const responseFormat = typeof payload?.response_format === 'string' ? payload.response_format.trim() : 'b64_json'
   const n = Number.isInteger(payload?.n) && payload.n > 0 ? payload.n : 1
   const images = Array.isArray(payload?.images) ? payload.images : []
@@ -1981,6 +2429,7 @@ function normalizeTaskPayload(payload) {
     prompt,
     size,
     model,
+    quality,
     response_format: responseFormat,
     n,
     stream,
@@ -2067,6 +2516,9 @@ async function callImageUpstream(task) {
     form.set('size', task.payload.size)
     form.set('n', String(task.payload.n))
     form.set('response_format', task.payload.response_format)
+    if (task.payload.quality) {
+      form.set('quality', task.payload.quality)
+    }
     form.set('stream', String(task.payload.stream))
     if (task.payload.stream) {
       form.set('partial_images', String(task.payload.partial_images))
@@ -2094,26 +2546,31 @@ async function callImageUpstream(task) {
     })
   }
 
+  const body = {
+    model: task.payload.model,
+    prompt: task.payload.prompt,
+    size: task.payload.size,
+    n: task.payload.n,
+    response_format: task.payload.response_format,
+    stream: task.payload.stream,
+    partial_images: task.payload.partial_images
+  }
+  if (task.payload.quality) {
+    body.quality = task.payload.quality
+  }
+
   return fetch(`${upstream}/v1/images/generations`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${task.apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify({
-      model: task.payload.model,
-      prompt: task.payload.prompt,
-      size: task.payload.size,
-      n: task.payload.n,
-      response_format: task.payload.response_format,
-      stream: task.payload.stream,
-      partial_images: task.payload.partial_images
-    })
+    body: JSON.stringify(body)
   })
 }
 
 function buildTaskResponse(task) {
-  const status = task.status === 'completed' && !task.archived ? 'processing' : task.status
+  const status = task.status === 'completed' && task.payload.conversation_id && !task.archived ? 'processing' : task.status
   const result = task.result && typeof task.result === 'object'
     ? {
       ...task.result,
@@ -2450,6 +2907,83 @@ async function createImageTask(body, userId) {
   broadcastTaskUpdate(task, 'task.status')
   void runImageTask(task)
   return task
+}
+
+async function createSshImageTask(req) {
+  const session = getSshSession(req)
+  const body = await parseJsonBody(req)
+  const payload = body?.payload && typeof body.payload === 'object' ? body.payload : body
+  const task = await createImageTask({
+    api_key: session.apiKey,
+    payload
+  }, session.userId)
+  return {
+    task_id: task.id,
+    status: task.status,
+    message: '任务已创建，图片生成通常需要等待一两分钟。请稍后用任务 id 查询进度并下载结果。'
+  }
+}
+
+async function getTaskForSshSession(req, taskId) {
+  const session = getSshSession(req)
+  const task = taskId ? (tasks.get(taskId) || await getPersistedImageTask(taskId)) : null
+  if (!task || Number(task.userId) !== Number(session.userId)) {
+    throw appError(404, 'Task not found')
+  }
+  return task
+}
+
+async function loadTaskResultImage(task, index) {
+  if (task.status !== 'completed') {
+    throw appError(409, 'Task is not completed yet')
+  }
+
+  const images = Array.isArray(task.result?.images) ? task.result.images : []
+  const image = images[index] || null
+  if (!image) {
+    throw appError(404, 'Task image not found')
+  }
+
+  const dataUrl = typeof image.data_url === 'string' ? image.data_url.trim() : ''
+  if (dataUrl.startsWith('data:')) {
+    return dataUrlToBuffer(dataUrl, 'image/png')
+  }
+
+  const assetToken = assetTokenFromUrl(image.image_url) || assetTokenFromUrl(image.remote_url)
+  if (assetToken) {
+    const asset = await getAssetByToken(assetToken)
+    if (!asset || Number(asset.user_id) !== Number(task.userId)) {
+      throw appError(404, 'Task image asset not found')
+    }
+    return loadAssetBuffer(asset)
+  }
+
+  const remoteUrl = (
+    typeof image.image_url === 'string' ? image.image_url.trim() : ''
+  ) || (
+    typeof image.remote_url === 'string' ? image.remote_url.trim() : ''
+  )
+  if (remoteUrl) {
+    return fetchImageUrlBuffer(remoteUrl, 'image/png')
+  }
+
+  throw appError(404, 'Task image has no downloadable source')
+}
+
+async function sendSshTaskImageDownload(req, res, taskId, index) {
+  const task = await getTaskForSshSession(req, taskId)
+  const imageIndex = Math.max(0, Number.parseInt(String(index || '0'), 10) || 0)
+  const image = await loadTaskResultImage(task, imageIndex)
+  const filename = buildAssetDownloadFilename({
+    public_token: `${task.id}-${imageIndex + 1}`,
+    mime_type: image.mimeType || 'image/png'
+  }, `${String(task.payload.prompt || 'playground-image').slice(0, 48)}-${imageIndex + 1}`)
+  res.writeHead(200, {
+    'Content-Disposition': buildAttachmentDisposition(filename),
+    'Content-Length': String(image.buffer.length),
+    'Content-Type': image.mimeType || 'image/png'
+  })
+  res.end(image.buffer)
 }
 
 async function resumePersistedImageTasks() {
@@ -3551,6 +4085,7 @@ async function serveStatic(req, res) {
 
 setInterval(cleanupTasks, 5 * 60 * 1000).unref()
 setInterval(cleanupRateLimitHits, 60 * 1000).unref()
+setInterval(cleanupSshAuthMaps, 60 * 1000).unref()
 await ensureRuntime()
 await resumePersistedImageTasks()
 
@@ -3569,6 +4104,75 @@ const server = createServer(async (req, res) => {
     }
 
     applyRateLimit(req, url)
+
+    if (req.method === 'GET' && url.pathname === '/api/playground/ssh-keys') {
+      const user = await getAuthenticatedUser(req)
+      const keys = await listSshKeys(user.id)
+      json(res, 200, { code: 0, message: 'success', data: keys })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/ssh-keys') {
+      const user = await getAuthenticatedUser(req)
+      const body = await parseJsonBody(req)
+      const key = await upsertSshKey(req, user, body)
+      json(res, 200, { code: 0, message: 'success', data: key })
+      return
+    }
+
+    if (req.method === 'DELETE' && url.pathname.startsWith('/api/playground/ssh-keys/')) {
+      const user = await getAuthenticatedUser(req)
+      const keyId = url.pathname.split('/').pop()
+      if (!keyId) {
+        throw appError(400, 'SSH key ID is required')
+      }
+      const result = await deleteSshKey(user.id, keyId)
+      json(res, 200, { code: 0, message: 'success', data: result })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/ssh/challenge') {
+      const body = await parseJsonBody(req)
+      const challenge = await createSshChallenge(body)
+      json(res, 200, { code: 0, message: 'success', data: challenge })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/ssh/login') {
+      const body = await parseJsonBody(req)
+      const loginResult = await loginWithSsh(body)
+      json(res, 200, { code: 0, message: 'success', data: loginResult })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/playground/ssh/tasks') {
+      const task = await createSshImageTask(req)
+      json(res, 202, { code: 0, message: 'accepted', data: task })
+      return
+    }
+
+    if ((req.method === 'GET' || req.method === 'HEAD') && /^\/api\/playground\/ssh\/tasks\/[^/]+\/download$/.test(url.pathname)) {
+      const taskId = url.pathname.split('/')[5]
+      if (req.method === 'HEAD') {
+        await getTaskForSshSession(req, taskId)
+        res.writeHead(200)
+        res.end()
+        return
+      }
+      await sendSshTaskImageDownload(req, res, taskId, url.searchParams.get('index'))
+      return
+    }
+
+    if (req.method === 'GET' && /^\/api\/playground\/ssh\/tasks\/[^/]+$/.test(url.pathname)) {
+      const taskId = url.pathname.split('/').pop()
+      const task = await getTaskForSshSession(req, taskId)
+      json(res, 200, {
+        code: 0,
+        message: 'success',
+        data: buildTaskResponse(task)
+      })
+      return
+    }
 
     if (req.method === 'GET' && url.pathname === '/api/playground/gallery') {
       const user = await getOptionalAuthenticatedUser(req)

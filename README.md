@@ -86,6 +86,15 @@ The browser no longer holds one long Cloudflare-facing image request open. It no
 3. Polls task status
 4. Reads image URLs or data URLs after completion
 
+## AI Skill and SSH Authentication
+
+The repository includes an installable skill at `skills/sub2api-image`. It contains two scripts:
+
+- `scripts/create_image_task.py` signs in with the local SSH key, creates an async image generation or edit task, and returns `task_id` immediately.
+- `scripts/download_image_task.py` signs in again, checks task status by `task_id`, and downloads completed images to a local path.
+
+In the WebUI, open the SSH tab in the create workspace, paste an SSH public key, and bind it to the currently selected OpenAI API key. The server verifies later script logins with `ssh-keygen -Y verify`, so the runtime image installs `openssh-client`. Protect the PostgreSQL database because SSH bindings store the selected API key for background image generation.
+
 ## Persistence Model
 
 - Conversation metadata is stored in local PostgreSQL.

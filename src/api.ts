@@ -14,6 +14,7 @@ import type {
   PptExportRequest,
   PaginatedResponse,
   ShareGalleryResponse,
+  SshKey,
   UserProfile
 } from './types'
 
@@ -184,6 +185,29 @@ export function createApiKey(name: string, groupId: number): Promise<ApiKey> {
       name,
       group_id: groupId
     })
+  })
+}
+
+export function listSshKeys(): Promise<SshKey[]> {
+  return request<SshKey[]>('/api/playground/ssh-keys')
+}
+
+export function saveSshKey(payload: {
+  name?: string
+  public_key: string
+  api_key: string
+  api_key_id?: number | null
+  api_key_name?: string
+}): Promise<SshKey> {
+  return request<SshKey>('/api/playground/ssh-keys', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  })
+}
+
+export function deleteSshKey(keyId: string): Promise<{ deleted: number }> {
+  return request<{ deleted: number }>(`/api/playground/ssh-keys/${encodeURIComponent(keyId)}`, {
+    method: 'DELETE'
   })
 }
 

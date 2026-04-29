@@ -8,6 +8,7 @@ import {
   createImageTask,
   createPptConversation,
   deleteLibraryItem,
+  deleteSshKey,
   exportPptPresentation,
   getConversation,
   getImageTask,
@@ -18,9 +19,11 @@ import {
   listConversations,
   listApiKeys,
   listAvailableGroups,
+  listSshKeys,
   login,
   logout,
   queryGalleryItems,
+  saveSshKey,
   updateLibraryItem,
   saveConversationState,
   sendResponsesRequest,
@@ -43,6 +46,7 @@ import type {
   PptExportRequest,
   PptSlidePlan,
   PptWorkspaceState,
+  SshKey,
   UserProfile
 } from './types'
 
@@ -140,7 +144,7 @@ const toastAutoCloseMs = 5000
 const sessionsCollapsed = ref(false)
 const imagesPanelOpen = ref(false)
 const mainSidebarCollapsed = ref(false)
-const workTab = ref<'sessions' | 'chat' | 'images'>('chat')
+const workTab = ref<'sessions' | 'chat' | 'images' | 'ssh'>('chat')
 const workSidebarOpen = ref(true)
 const email = ref('')
 const password = ref('')
@@ -190,6 +194,11 @@ let conversationLoadRequestId = 0
 let pptAutoSaveTimer: number | null = null
 const sharingImageKeys = ref<string[]>([])
 const sharedImageKeys = ref<string[]>([])
+const sshKeys = ref<SshKey[]>([])
+const sshKeyName = ref('')
+const sshPublicKey = ref('')
+const sshBusy = ref(false)
+const sshDeletingIds = ref<string[]>([])
 
 const profile = ref<UserProfile | null>(null)
 const apiKeys = ref<ApiKey[]>([])
@@ -265,6 +274,7 @@ const selectedApiKey = computed(() => {
 })
 
 const selectedKeySecret = computed(() => selectedApiKey.value?.key || '')
+const sshCanSave = computed(() => Boolean(sshPublicKey.value.trim() && selectedKeySecret.value && !sshBusy.value))
 
 const balanceLabel = computed(() => {
   if (!profile.value) {
@@ -2025,10 +2035,23 @@ async function refreshWorkspace(): Promise<void> {
     if (!selectedApiKeyId.value && openAiApiKeys.value.length > 0) {
       selectedApiKeyId.value = openAiApiKeys.value[0].id
     }
+    await refreshSshKeys()
   } catch (error) {
     setError(error instanceof Error ? error.message : '加载用户信息失败')
   } finally {
     loadingApp.value = false
+  }
+}
+
+async function refreshSshKeys(): Promise<void> {
+  if (!isAuthenticated.value) {
+    sshKeys.value = []
+    return
+  }
+  try {
+    sshKeys.value = await listSshKeys()
+  } catch {
+    sshKeys.value = []
   }
 }
 
@@ -2058,6 +2081,9 @@ async function handleLogout(): Promise<void> {
   profile.value = null
   apiKeys.value = []
   groups.value = []
+  sshKeys.value = []
+  sshKeyName.value = ''
+  sshPublicKey.value = ''
   selectedApiKeyId.value = null
   chatInput.value = ''
   composerImages.value = []
@@ -2082,6 +2108,49 @@ async function handleCreateApiKey(): Promise<void> {
     selectedApiKeyId.value = key.id
   } catch (error) {
     setError(error instanceof Error ? error.message : '创建 API Key 失败')
+  }
+}
+
+async function handleSaveSshKey(): Promise<void> {
+  if (!sshPublicKey.value.trim()) {
+    setError('请输入 SSH 公钥。')
+    return
+  }
+  if (!selectedApiKey.value || !selectedKeySecret.value) {
+    setError('请先选择或创建一个 OpenAI 分组 API Key。')
+    return
+  }
+
+  sshBusy.value = true
+  try {
+    const key = await saveSshKey({
+      name: sshKeyName.value.trim(),
+      public_key: sshPublicKey.value.trim(),
+      api_key: selectedKeySecret.value,
+      api_key_id: selectedApiKey.value.id,
+      api_key_name: selectedApiKey.value.name
+    })
+    sshKeyName.value = ''
+    sshPublicKey.value = ''
+    await refreshSshKeys()
+    setSuccess(`SSH 公钥已绑定：${key.name || key.fingerprint}`)
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '绑定 SSH 公钥失败')
+  } finally {
+    sshBusy.value = false
+  }
+}
+
+async function handleDeleteSshKey(key: SshKey): Promise<void> {
+  sshDeletingIds.value = [...sshDeletingIds.value, key.id]
+  try {
+    await deleteSshKey(key.id)
+    sshKeys.value = sshKeys.value.filter((item) => item.id !== key.id)
+    setSuccess('SSH 公钥已移除。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '移除 SSH 公钥失败')
+  } finally {
+    sshDeletingIds.value = sshDeletingIds.value.filter((id) => id !== key.id)
   }
 }
 
@@ -5766,6 +5835,17 @@ onBeforeUnmount(() => {
               </svg>
             </button>
             <button
+              class="work-tab-btn"
+              :class="{ active: workTab === 'ssh' }"
+              type="button"
+              title="SSH 认证"
+              @click="workTab = 'ssh'"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0 3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+              </svg>
+            </button>
+            <button
               class="work-tab-btn work-tab-close"
               type="button"
               title="关闭工作面板"
@@ -6012,6 +6092,51 @@ onBeforeUnmount(() => {
                 </div>
               </article>
               <p v-if="generatedImages.length === 0" class="empty">当前会话还没有生成图片。</p>
+            </div>
+          </div>
+
+          <!-- SSH Tab -->
+          <div v-if="workTab === 'ssh'" class="work-tab-content ssh-content">
+            <div class="work-tab-header">
+              <span class="eyebrow">SSH</span>
+              <span class="pill">{{ sshKeys.length }}</span>
+            </div>
+            <div class="ssh-panel work-scroll">
+              <form class="ssh-form" @submit.prevent="handleSaveSshKey">
+                <label>
+                  名称
+                  <input v-model="sshKeyName" type="text" maxlength="80" placeholder="workstation" />
+                </label>
+                <label>
+                  公钥
+                  <textarea v-model="sshPublicKey" rows="5" placeholder="ssh-ed25519 AAAA..."></textarea>
+                </label>
+                <button class="secondary" type="submit" :disabled="!sshCanSave">
+                  {{ sshBusy ? '绑定中...' : '绑定当前 API Key' }}
+                </button>
+              </form>
+              <div class="ssh-key-list">
+                <article v-for="key in sshKeys" :key="key.id" class="ssh-key-item">
+                  <div>
+                    <strong>{{ key.name || key.fingerprint }}</strong>
+                    <span>{{ key.key_type }} · {{ key.api_key_name || 'OpenAI API Key' }}</span>
+                    <code>{{ key.fingerprint }}</code>
+                  </div>
+                  <button
+                    class="icon-button"
+                    type="button"
+                    :disabled="sshDeletingIds.includes(key.id)"
+                    aria-label="移除 SSH 公钥"
+                    title="移除"
+                    @click="handleDeleteSshKey(key)"
+                  >
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M3 6h18M8 6V4h8v2M7 6l1 14h8l1-14" />
+                    </svg>
+                  </button>
+                </article>
+                <p v-if="sshKeys.length === 0" class="empty">暂无 SSH 公钥。</p>
+              </div>
             </div>
           </div>
         </aside>

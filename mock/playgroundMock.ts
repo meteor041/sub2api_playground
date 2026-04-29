@@ -39,6 +39,19 @@ interface MockApiKey {
   group: MockGroup
 }
 
+interface MockSshKey {
+  id: string
+  name: string
+  public_key: string
+  fingerprint: string
+  key_type: string
+  api_key_id: number | null
+  api_key_name: string
+  created_at: string
+  updated_at: string
+  last_used_at: string | null
+}
+
 interface MockConversation {
   id: string
   title: string
@@ -154,6 +167,7 @@ let apiKeys: MockApiKey[] = [
 
 const conversations = new Map<string, MockConversation>()
 const tasks = new Map<string, MockTask>()
+const sshKeys = new Map<string, MockSshKey>()
 const galleryItems: MockGalleryItem[] = seedGalleryItems()
 const libraryItems: MockLibraryItem[] = seedLibraryItems()
 const deletedLibrarySources = new Set<string>()
@@ -172,6 +186,54 @@ function createMockApiKey(name: string): MockApiKey {
     quota_used: 0,
     group: openAiGroup
   }
+}
+
+function normalizeMockSshPublicKey(value: unknown): { publicKey: string; keyType: string; fingerprint: string } {
+  const publicKey = typeof value === 'string' ? value.trim().replace(/\r?\n/g, ' ') : ''
+  const parts = publicKey.split(/\s+/).filter(Boolean)
+  if (parts.length < 2 || (!parts[0].startsWith('ssh-') && !parts[0].startsWith('ecdsa-') && !parts[0].startsWith('sk-'))) {
+    throw httpError(400, 'SSH public key is required')
+  }
+  return {
+    publicKey,
+    keyType: parts[0],
+    fingerprint: `SHA256:${createHash('sha256').update(publicKey).digest('base64').replace(/=+$/, '')}`
+  }
+}
+
+function mapMockSshKey(key: MockSshKey): JsonRecord {
+  return {
+    id: key.id,
+    name: key.name,
+    fingerprint: key.fingerprint,
+    key_type: key.key_type,
+    api_key_id: key.api_key_id,
+    api_key_name: key.api_key_name,
+    created_at: key.created_at,
+    updated_at: key.updated_at,
+    last_used_at: key.last_used_at
+  }
+}
+
+function upsertMockSshKey(body: JsonRecord): MockSshKey {
+  const normalized = normalizeMockSshPublicKey(body.public_key)
+  const now = nowIso()
+  const selectedApiKey = apiKeys.find((key) => key.key === body.api_key) || apiKeys[0]
+  const existing = Array.from(sshKeys.values()).find((key) => key.fingerprint === normalized.fingerprint)
+  const key: MockSshKey = {
+    id: existing?.id || randomUUID(),
+    name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : normalized.fingerprint,
+    public_key: normalized.publicKey,
+    fingerprint: normalized.fingerprint,
+    key_type: normalized.keyType,
+    api_key_id: selectedApiKey?.id || null,
+    api_key_name: selectedApiKey?.name || 'MOCK Playground Key',
+    created_at: existing?.created_at || now,
+    updated_at: now,
+    last_used_at: existing?.last_used_at || null
+  }
+  sshKeys.set(key.id, key)
+  return key
 }
 
 function playgroundMockPlugin(enabled: boolean, latencyMs: number): Plugin {
@@ -276,6 +338,28 @@ async function handleMockRequest(
     const key = createMockApiKey(name)
     apiKeys = [key, ...apiKeys]
     sendJson(res, 201, envelope(key))
+    return true
+  }
+
+  if (method === 'GET' && url.pathname === '/api/playground/ssh-keys') {
+    requireMockAuth(req)
+    sendJson(res, 200, envelope(Array.from(sshKeys.values()).map(mapMockSshKey)))
+    return true
+  }
+
+  if (method === 'POST' && url.pathname === '/api/playground/ssh-keys') {
+    requireMockAuth(req)
+    const body = await readJsonBody(req)
+    const key = upsertMockSshKey(body)
+    sendJson(res, 200, envelope(mapMockSshKey(key)))
+    return true
+  }
+
+  const sshKeyId = matchPath(url.pathname, '/api/playground/ssh-keys/')
+  if (sshKeyId && method === 'DELETE') {
+    requireMockAuth(req)
+    const deleted = sshKeys.delete(sshKeyId) ? 1 : 0
+    sendJson(res, 200, envelope({ deleted }))
     return true
   }
 
