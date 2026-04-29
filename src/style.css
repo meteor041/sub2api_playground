@@ -3910,6 +3910,10 @@ h2 {
   gap: 8px;
 }
 
+.sprite-role-custom-input {
+  margin-top: 8px;
+}
+
 .sprite-role-chip {
   min-width: 64px;
   padding: 0.62rem 0.9rem;

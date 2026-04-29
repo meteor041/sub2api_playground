@@ -98,7 +98,8 @@ const spriteActionPresets = [
 const spriteRoleOptions = [
   { value: '主角', label: '主角' },
   { value: '敌人', label: '敌人' },
-  { value: 'NPC', label: 'NPC' }
+  { value: 'NPC', label: 'NPC' },
+  { value: '__custom__', label: '自定义' }
 ]
 const spriteDirectionPresets = [
   { value: 'front', label: '正面' },
@@ -450,6 +451,11 @@ const canGenerateSpriteConcept = computed(() => (
   Boolean(selectedKeySecret.value) &&
   Boolean(spriteCharacterForm.value.name.trim() || spriteCharacterForm.value.description.trim()) &&
   !imageBusy.value
+))
+const spriteRolePresetValues = computed(() => spriteRoleOptions.map((option) => option.value).filter((value) => value !== '__custom__'))
+const spriteRoleIsCustom = computed(() => (
+  Boolean(spriteCharacterForm.value.archetype.trim()) &&
+  !spriteRolePresetValues.value.includes(spriteCharacterForm.value.archetype.trim())
 ))
 const spritePreviewActionGroups = computed(() => spriteState.value?.actionGroups || [])
 const currentSpritePreviewActionGroup = computed(() => {
@@ -6053,13 +6059,21 @@ onBeforeUnmount(() => {
                       v-for="option in spriteRoleOptions"
                       :key="option.value"
                       class="sprite-role-chip"
-                      :class="{ active: spriteCharacterForm.archetype === option.value }"
+                      :class="{ active: option.value === '__custom__' ? spriteRoleIsCustom : spriteCharacterForm.archetype === option.value }"
                       type="button"
-                      @click="spriteCharacterForm.archetype = option.value"
+                      @click="spriteCharacterForm.archetype = option.value === '__custom__' ? '' : option.value"
                     >
                       {{ option.label }}
                     </button>
                   </div>
+                  <input
+                    v-if="spriteRoleIsCustom || spriteCharacterForm.archetype === ''"
+                    v-model="spriteCharacterForm.archetype"
+                    class="sprite-role-custom-input"
+                    type="text"
+                    maxlength="120"
+                    placeholder="输入自定义角色类型"
+                  />
                 </label>
                 <label class="sprite-form-span-2">
                   外观描述
