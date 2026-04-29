@@ -35,6 +35,7 @@ import type {
   ApiKey,
   ChatImageAttachment,
   ChatMessage,
+  ConversationPayload,
   ConversationSummary,
   GalleryItem,
   GeneratedImage,
@@ -1698,6 +1699,63 @@ function sortConversations(items: ConversationSummary[]): ConversationSummary[] 
   })
 }
 
+function isBlankConversationState(state: {
+  chatMessages?: ChatMessage[]
+  generatedImages?: GeneratedImage[]
+  pptState?: PptWorkspaceState | null
+} | null | undefined): boolean {
+  const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
+  const generatedImages = Array.isArray(state?.generatedImages) ? state.generatedImages : []
+  const pptState = state?.pptState && typeof state.pptState === 'object' ? state.pptState : null
+
+  return chatMessages.length === 0 &&
+    generatedImages.length === 0 &&
+    !pptState
+}
+
+async function findReusableBlankCreateConversation(): Promise<ConversationPayload | null> {
+  if (currentConversation.value?.workspaceType === 'create' && isBlankConversationState({
+    chatMessages: chatMessages.value,
+    generatedImages: generatedImages.value,
+    pptState: null
+  })) {
+    return {
+      conversation: currentConversation.value,
+      state: {
+        workspaceType: 'create',
+        chatMessages: [],
+        generatedImages: []
+      }
+    }
+  }
+
+  const candidates = createTaskRecords.value.filter((conversation) => (
+    conversation.id !== currentConversationId.value &&
+    !conversation.lastMessageAt &&
+    conversation.title === '新会话'
+  ))
+
+  for (const candidate of candidates) {
+    const payload = await getConversation(candidate.id)
+    if (payload.conversation.workspaceType === 'create' && isBlankConversationState(payload.state)) {
+      return payload
+    }
+  }
+
+  return null
+}
+
+async function activateReusableBlankCreateConversation(payload: ConversationPayload): Promise<void> {
+  persistActiveConversationId(payload.conversation.id, 'create')
+  await saveConversationSnapshot(
+    payload.conversation.id,
+    payload.state.chatMessages || [],
+    normalizeGeneratedImages(payload.state.generatedImages || []),
+    payload.state.pptState || null,
+    'create'
+  )
+}
+
 function workspaceConversationStorageKey(workspaceType: 'create' | 'ppt'): string {
   return workspaceType === 'ppt' ? ACTIVE_PPT_CONVERSATION_KEY : ACTIVE_CREATE_CONVERSATION_KEY
 }
@@ -1921,6 +1979,13 @@ async function loadConversationById(conversationId: string): Promise<void> {
 async function startNewConversation(): Promise<void> {
   conversationBusy.value = true
   try {
+    const reusableConversation = await findReusableBlankCreateConversation()
+    if (reusableConversation) {
+      activeView.value = 'create'
+      await activateReusableBlankCreateConversation(reusableConversation)
+      return
+    }
+
     const created = await createConversation()
     conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
     persistActiveConversationId(created.id, 'create')
