@@ -3958,6 +3958,41 @@ h2 {
   font-weight: 700;
 }
 
+.sprite-collapsible-field {
+  padding: 12px 14px 14px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-soft-bg);
+}
+
+.sprite-collapsible-field summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.sprite-collapsible-field summary::-webkit-details-marker {
+  display: none;
+}
+
+.sprite-collapsible-field summary svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+
+.sprite-collapsible-field[open] summary svg {
+  transform: rotate(180deg);
+}
+
 .sprite-choice-tags {
   display: flex;
   flex-wrap: wrap;

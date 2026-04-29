@@ -6298,8 +6298,13 @@ onBeforeUnmount(() => {
                   服装
                   <input v-model="spriteCharacterForm.costume" type="text" maxlength="160" placeholder="短斗篷、轻甲、腰间工具包" />
                 </label>
-                <div class="sprite-form-span-2">
-                  <span class="sprite-field-label">⚔️ 装备</span>
+                <details class="sprite-form-span-2 sprite-collapsible-field">
+                  <summary>
+                    <span class="sprite-field-label">⚔️ 装备</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </summary>
                   <div class="sprite-equipment-grid">
                     <button
                       v-for="option in spriteEquipmentOptions"
@@ -6321,7 +6326,7 @@ onBeforeUnmount(() => {
                     maxlength="160"
                     placeholder="输入自定义装备或武器"
                   />
-                </div>
+                </details>
                 <label>
                   主配色
                   <input v-model="spriteCharacterForm.palette" type="text" maxlength="120" placeholder="煤灰、铜橙、冰蓝高光" />
