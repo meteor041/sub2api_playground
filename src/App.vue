@@ -5963,7 +5963,7 @@ onBeforeUnmount(() => {
                 </label>
                 <label>
                   设定图尺寸
-                  <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" />
+                  <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
                 </label>
                 <details class="sprite-detail-box sprite-form-span-2">
                   <summary>
