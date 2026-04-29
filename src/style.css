@@ -3951,6 +3951,84 @@ h2 {
   outline-color: var(--accent);
 }
 
+.sprite-field-label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ink);
+  font-weight: 700;
+}
+
+.sprite-choice-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sprite-choice-tag {
+  padding: 0.56rem 0.82rem;
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--ghost-bg);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+}
+
+.sprite-choice-tag:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  background: var(--panel-soft-bg);
+}
+
+.sprite-choice-tag.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline-color: var(--accent);
+}
+
+.sprite-choice-custom-input {
+  margin-top: 8px;
+}
+
+.sprite-equipment-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sprite-equipment-card {
+  display: grid;
+  gap: 4px;
+  min-height: 78px;
+  padding: 12px;
+  border-radius: 18px;
+  color: var(--ink);
+  background: var(--ghost-bg);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+  text-align: left;
+}
+
+.sprite-equipment-card:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  background: var(--panel-soft-bg);
+}
+
+.sprite-equipment-card strong {
+  font-size: 0.92rem;
+}
+
+.sprite-equipment-card small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.sprite-equipment-card.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline-color: var(--accent);
+}
+
 .sprite-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -4202,6 +4280,7 @@ h2 {
 
   .sprite-form-grid,
   .sprite-detail-grid,
+  .sprite-equipment-grid,
   .sprite-action-form,
   .sprite-reference-card {
     grid-template-columns: 1fr;

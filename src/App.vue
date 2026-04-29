@@ -101,6 +101,39 @@ const spriteRoleOptions = [
   { value: 'NPC', label: 'NPC' },
   { value: '__custom__', label: '自定义' }
 ]
+const spriteHairOptions = [
+  '短发',
+  '长发',
+  '双马尾',
+  '丸子头',
+  '波浪卷',
+  '侧剃',
+  '高马尾'
+]
+const spriteExpressionOptions = [
+  '冷峻',
+  '温柔',
+  '活泼',
+  '神秘',
+  '坚毅',
+  '狡黠'
+]
+const spriteEquipmentOptions = [
+  { value: '双枪', label: '⚔️ 双枪', hint: '敏捷远程' },
+  { value: '巨剑', label: '🗡️ 巨剑', hint: '正面压制' },
+  { value: '法杖', label: '✨ 法杖', hint: '魔法施法' },
+  { value: '弓箭', label: '🏹 弓箭', hint: '机动输出' },
+  { value: '机械臂', label: '🦾 机械臂', hint: '科幻强化' },
+  { value: '__custom__', label: '✍️ 自定义', hint: '自己输入' }
+]
+const spriteVisualStyleOptions = [
+  { value: '2D 游戏美术', label: '2D 游戏美术' },
+  { value: '日系动画角色设定', label: '日系动画角色设定' },
+  { value: '卡通赛璐璐', label: '卡通赛璐璐' },
+  { value: '欧美英雄漫画', label: '欧美英雄漫画' },
+  { value: '轻像素插画感', label: '轻像素插画感' },
+  { value: '__custom__', label: '自定义画风' }
+]
 const spriteDirectionPresets = [
   { value: 'front', label: '正面' },
   { value: 'side', label: '侧面' },
@@ -456,6 +489,23 @@ const spriteRolePresetValues = computed(() => spriteRoleOptions.map((option) => 
 const spriteRoleIsCustom = computed(() => (
   Boolean(spriteCharacterForm.value.archetype.trim()) &&
   !spriteRolePresetValues.value.includes(spriteCharacterForm.value.archetype.trim())
+))
+const spriteHairIsCustom = computed(() => (
+  Boolean(spriteCharacterForm.value.hair.trim()) &&
+  !spriteHairOptions.includes(spriteCharacterForm.value.hair.trim())
+))
+const spriteExpressionIsCustom = computed(() => (
+  Boolean(spriteCharacterForm.value.faceTraits.trim()) &&
+  !spriteExpressionOptions.includes(spriteCharacterForm.value.faceTraits.trim())
+))
+const spriteEquipmentPresetValues = computed(() => spriteEquipmentOptions.map((option) => option.value).filter((value) => value !== '__custom__'))
+const spriteEquipmentIsCustom = computed(() => (
+  Boolean(spriteCharacterForm.value.accessories.trim()) &&
+  !spriteEquipmentPresetValues.value.includes(spriteCharacterForm.value.accessories.trim())
+))
+const spriteVisualStyleIsCustom = computed(() => (
+  Boolean(spriteCharacterForm.value.visualStyle.trim()) &&
+  !spriteVisualStyleOptions.some((option) => option.value === spriteCharacterForm.value.visualStyle.trim())
 ))
 const spritePreviewActionGroups = computed(() => spriteState.value?.actionGroups || [])
 const currentSpritePreviewActionGroup = computed(() => {
@@ -6086,21 +6136,79 @@ onBeforeUnmount(() => {
                   <textarea v-model="spriteCharacterForm.description" rows="4" placeholder="描述整体外观、气质、年龄感和辨识度"></textarea>
                 </label>
                 <label>
-                  发型
-                  <input v-model="spriteCharacterForm.hair" type="text" maxlength="120" placeholder="短银发，右侧剃边" />
+                  👩 发型
+                  <div class="sprite-choice-tags">
+                    <button
+                      v-for="option in spriteHairOptions"
+                      :key="option"
+                      class="sprite-choice-tag"
+                      :class="{ active: spriteCharacterForm.hair === option }"
+                      type="button"
+                      @click="spriteCharacterForm.hair = option"
+                    >
+                      {{ option }}
+                    </button>
+                  </div>
+                  <input
+                    v-if="spriteHairIsCustom || spriteCharacterForm.hair === ''"
+                    v-model="spriteCharacterForm.hair"
+                    class="sprite-choice-custom-input"
+                    type="text"
+                    maxlength="120"
+                    placeholder="输入自定义发型"
+                  />
                 </label>
                 <label>
-                  面部特征
-                  <input v-model="spriteCharacterForm.faceTraits" type="text" maxlength="120" placeholder="锐利眼型，左眉有浅疤" />
+                  👁️ 表情风格
+                  <div class="sprite-choice-tags">
+                    <button
+                      v-for="option in spriteExpressionOptions"
+                      :key="option"
+                      class="sprite-choice-tag"
+                      :class="{ active: spriteCharacterForm.faceTraits === option }"
+                      type="button"
+                      @click="spriteCharacterForm.faceTraits = option"
+                    >
+                      {{ option }}
+                    </button>
+                  </div>
+                  <input
+                    v-if="spriteExpressionIsCustom || spriteCharacterForm.faceTraits === ''"
+                    v-model="spriteCharacterForm.faceTraits"
+                    class="sprite-choice-custom-input"
+                    type="text"
+                    maxlength="120"
+                    placeholder="输入自定义表情风格"
+                  />
                 </label>
                 <label>
                   服装
                   <input v-model="spriteCharacterForm.costume" type="text" maxlength="160" placeholder="短斗篷、轻甲、腰间工具包" />
                 </label>
-                <label>
-                  配件 / 武器
-                  <input v-model="spriteCharacterForm.accessories" type="text" maxlength="160" placeholder="双枪、护目镜、机械手套" />
-                </label>
+                <div class="sprite-form-span-2">
+                  <span class="sprite-field-label">⚔️ 装备</span>
+                  <div class="sprite-equipment-grid">
+                    <button
+                      v-for="option in spriteEquipmentOptions"
+                      :key="option.value"
+                      class="sprite-equipment-card"
+                      :class="{ active: option.value === '__custom__' ? spriteEquipmentIsCustom : spriteCharacterForm.accessories === option.value }"
+                      type="button"
+                      @click="spriteCharacterForm.accessories = option.value === '__custom__' ? '' : option.value"
+                    >
+                      <strong>{{ option.label }}</strong>
+                      <small>{{ option.hint }}</small>
+                    </button>
+                  </div>
+                  <input
+                    v-if="spriteEquipmentIsCustom || spriteCharacterForm.accessories === ''"
+                    v-model="spriteCharacterForm.accessories"
+                    class="sprite-choice-custom-input"
+                    type="text"
+                    maxlength="160"
+                    placeholder="输入自定义装备或武器"
+                  />
+                </div>
                 <label>
                   主配色
                   <input v-model="spriteCharacterForm.palette" type="text" maxlength="120" placeholder="煤灰、铜橙、冰蓝高光" />
@@ -6115,7 +6223,21 @@ onBeforeUnmount(() => {
                 </label>
                 <label>
                   画风
-                  <input v-model="spriteCharacterForm.visualStyle" type="text" maxlength="160" placeholder="2D 游戏美术，清晰轮廓，适合角色资产制作" />
+                  <RoundSelect
+                    :model-value="spriteVisualStyleIsCustom ? '__custom__' : (spriteCharacterForm.visualStyle || '2D 游戏美术')"
+                    title="画风"
+                    :options="spriteVisualStyleOptions"
+                    :show-stepper="false"
+                    @update:model-value="(value) => { spriteCharacterForm.visualStyle = value === '__custom__' ? '' : String(value) }"
+                  />
+                  <input
+                    v-if="spriteVisualStyleIsCustom || spriteCharacterForm.visualStyle === ''"
+                    v-model="spriteCharacterForm.visualStyle"
+                    class="sprite-choice-custom-input"
+                    type="text"
+                    maxlength="160"
+                    placeholder="输入自定义画风"
+                  />
                 </label>
               </div>
             </section>
