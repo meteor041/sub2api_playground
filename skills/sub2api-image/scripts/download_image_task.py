@@ -14,6 +14,8 @@ import urllib.request
 
 NAMESPACE = "sub2api-playground"
 DEFAULT_PLAYGROUND_URL = "https://playground.meteor041.com"
+DEFAULT_USER_AGENT = "Sub2API-Image-Skill/1.0 (+https://playground.meteor041.com)"
+USER_AGENT = os.environ.get("SUB2API_USER_AGENT", DEFAULT_USER_AGENT)
 
 
 class ScriptError(Exception):
@@ -33,7 +35,11 @@ def normalize_url(value):
 
 def request_json(base_url, path, payload=None, token=None, method=None):
     data = None
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": USER_AGENT,
+    }
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -120,8 +126,8 @@ def public_key_for(private_key):
 
 
 def sign_message(private_key, namespace, message):
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
-        tmp.write(message)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+        tmp.write(message.encode("utf-8"))
         message_path = Path(tmp.name)
     signature_path = Path(f"{message_path}.sig")
     try:
@@ -162,7 +168,12 @@ def extension_for(content_type):
 def download_bytes(base_url, path, token):
     req = urllib.request.Request(
         f"{base_url}{path}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "User-Agent": USER_AGENT,
+        },
         method="GET",
     )
     try:
@@ -198,13 +209,16 @@ def resolve_output_paths(download_path, task_id, count, content_types):
 
 
 def main():
+    global USER_AGENT
     parser = argparse.ArgumentParser(description="Query a Sub2API Playground image task and download completed images.")
     parser.add_argument("--task-id", required=True)
     parser.add_argument("--download-path", required=True)
     parser.add_argument("--playground-url", default=os.environ.get("SUB2API_PLAYGROUND_URL", DEFAULT_PLAYGROUND_URL))
     parser.add_argument("--ssh-key", default=os.environ.get("SUB2API_SSH_KEY"))
+    parser.add_argument("--user-agent", default=os.environ.get("SUB2API_USER_AGENT", DEFAULT_USER_AGENT))
     args = parser.parse_args()
 
+    USER_AGENT = args.user_agent
     base_url = normalize_url(args.playground_url)
     token = ssh_login(base_url, args.ssh_key)
     task_path = f"/api/playground/ssh/tasks/{urllib.parse.quote(args.task_id)}"
