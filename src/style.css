@@ -3947,9 +3947,13 @@ h2 {
   margin-top: 16px;
 }
 
-.sprite-generate-bar span {
-  color: var(--muted);
-  font-size: 0.92rem;
+.sprite-generate-primary {
+  min-width: 220px;
+  padding: 1rem 1.45rem;
+  font-size: 1rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  box-shadow: 0 16px 28px rgba(15, 23, 42, 0.18);
 }
 
 .sprite-preview-card {

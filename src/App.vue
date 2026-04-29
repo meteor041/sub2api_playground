@@ -6151,7 +6151,7 @@ onBeforeUnmount(() => {
                 </label>
               </div>
               <div class="sprite-generate-bar">
-                <button class="secondary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
+                <button class="primary sprite-generate-primary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
                   {{ imageBusy ? (imageTaskLabel || '处理中...') : '生成角色设定图' }}
                 </button>
               </div>
