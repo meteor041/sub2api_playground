@@ -6981,6 +6981,7 @@ onBeforeUnmount(() => {
                 title="API Key"
                 :options="openAiApiKeyOptions"
                 :disabled="openAiApiKeys.length === 0"
+                :show-stepper="false"
               />
               <button
                 class="canvas-icon-btn"
