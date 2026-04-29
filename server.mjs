@@ -35,6 +35,7 @@ const taskRetentionMs = 60 * 60 * 1000
 const taskHardTTLms = 6 * 60 * 60 * 1000
 const tasks = new Map()
 const taskStreamSubscribers = new Map()
+const conversationMutationLocks = new Map()
 const sshChallenges = new Map()
 const sshSessions = new Map()
 const authUserCache = new Map()
@@ -116,6 +117,29 @@ function removeTaskStreamSubscriber(taskId, subscriber) {
   subscribers.delete(subscriber)
   if (subscribers.size === 0) {
     taskStreamSubscribers.delete(taskId)
+  }
+}
+
+async function withConversationMutationLock(userId, conversationId, fn) {
+  const key = `${userId}:${conversationId}`
+  const previous = conversationMutationLocks.get(key) || Promise.resolve()
+  let releaseCurrent
+  const current = new Promise((resolve) => {
+    releaseCurrent = resolve
+  })
+  const tail = previous
+    .catch(() => {})
+    .then(() => current)
+  conversationMutationLocks.set(key, tail)
+
+  await previous.catch(() => {})
+  try {
+    return await fn()
+  } finally {
+    releaseCurrent()
+    if (conversationMutationLocks.get(key) === tail) {
+      conversationMutationLocks.delete(key)
+    }
   }
 }
 
@@ -2742,78 +2766,68 @@ async function archiveImageTaskToConversation(task) {
     return
   }
 
-  const conversation = await loadConversation(task.userId, task.payload.conversation_id)
-  const taskPrefix = taskImagePrefix(task.id)
-  const existingImages = conversation.state.generatedImages.filter((image) => !String(image?.id || '').startsWith(taskPrefix))
-  const taskImages = task.status === 'completed' ? buildTaskImageItems(task) : []
-  const nextImages = task.status === 'completed'
-    ? [...taskImages, ...existingImages]
-    : existingImages
-  const firstImage = nextImages[0] || null
-  const assistantMessageId = task.payload.assistant_message_id || `assistant-image-${task.id}`
-  const content = task.status === 'failed'
-    ? `图片任务失败：${task.error || '图片生成失败'}`
-    : (task.payload.mode === 'edit'
-      ? `已按要求编辑图片：${task.payload.prompt}`
-      : `已根据提示词生成图片：${task.payload.prompt}`)
-  const nextMessages = replaceOrAppendStoredMessage(conversation.state.chatMessages, {
-    id: assistantMessageId,
-    role: 'assistant',
-    content,
-    createdAt: Date.now(),
-    imageDataUrl: task.status === 'completed' && firstImage
-      ? firstImage.dataUrl || firstImage.image_url || firstImage.remoteUrl
-      : undefined
-  })
-  const nextPptState = task.status === 'completed' && taskImages.length > 0
-    ? mergeTaskImageIntoPptState(conversation.state.pptState || null, task.payload.ppt_context || null, taskImages[0])
-    : (conversation.state.pptState || null)
+  await withConversationMutationLock(task.userId, task.payload.conversation_id, async () => {
+    const conversation = await loadConversation(task.userId, task.payload.conversation_id)
+    const taskPrefix = taskImagePrefix(task.id)
+    const existingImages = conversation.state.generatedImages.filter((image) => !String(image?.id || '').startsWith(taskPrefix))
+    const taskImages = task.status === 'completed' ? buildTaskImageItems(task) : []
+    const nextImages = task.status === 'completed'
+      ? [...taskImages, ...existingImages]
+      : existingImages
+    const firstImage = nextImages[0] || null
+    const assistantMessageId = task.payload.assistant_message_id || `assistant-image-${task.id}`
+    const content = task.status === 'failed'
+      ? `图片任务失败：${task.error || '图片生成失败'}`
+      : (task.payload.mode === 'edit'
+        ? `已按要求编辑图片：${task.payload.prompt}`
+        : `已根据提示词生成图片：${task.payload.prompt}`)
+    const nextMessages = replaceOrAppendStoredMessage(conversation.state.chatMessages, {
+      id: assistantMessageId,
+      role: 'assistant',
+      content,
+      createdAt: Date.now(),
+      imageDataUrl: task.status === 'completed' && firstImage
+        ? firstImage.dataUrl || firstImage.image_url || firstImage.remoteUrl
+        : undefined
+    })
+    const nextPptState = task.status === 'completed' && taskImages.length > 0
+      ? mergeTaskImageIntoPptState(conversation.state.pptState || null, task.payload.ppt_context || null, taskImages[0])
+      : (conversation.state.pptState || null)
 
-  await saveConversationState(task.userId, task.payload.conversation_id, {
-    workspaceType: conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create',
-    chatMessages: nextMessages,
-    generatedImages: nextImages,
-    pptState: nextPptState
-  })
-  if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
-    const originalResultImages = task.result.images
-    const hydratedConversation = await loadConversation(task.userId, task.payload.conversation_id)
-    const taskImageIds = new Set(taskImages.map((image) => image.id))
-    const hydratedImageMap = new Map(
-      hydratedConversation.state.generatedImages
-        .filter((image) => taskImageIds.has(image.id))
-        .map((image) => [image.id, image])
-    )
-    task.result = {
-      ...task.result,
-      images: taskImages.map((taskImage, index) => {
-        const originalImage = originalResultImages[index] || {}
-        const hydratedImage = hydratedImageMap.get(taskImage.id)
-        return {
-          id: originalImage.id || `image-${index + 1}`,
-          prompt: hydratedImage?.prompt || taskImage.prompt,
-          size: hydratedImage?.size || taskImage.size,
-          data_url: hydratedImage?.dataUrl || taskImage.dataUrl || null,
-          remote_url: hydratedImage?.remoteUrl || taskImage.remoteUrl || null,
-          image_url: hydratedImage?.image_url || taskImage.image_url || null
-        }
-      })
-    }
-    if (conversation.state.workspaceType === 'ppt' && task.payload.ppt_context) {
-      const hydratedFirstImage = hydratedConversation.state.generatedImages.find((image) => image.id === taskImages[0]?.id) || null
-      const hydratedPptState = mergeTaskImageIntoPptState(
-        hydratedConversation.state.pptState || null,
-        task.payload.ppt_context,
-        hydratedFirstImage
+    await saveConversationStateUnlocked(task.userId, task.payload.conversation_id, {
+      workspaceType: conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create',
+      chatMessages: nextMessages,
+      generatedImages: nextImages,
+      pptState: nextPptState
+    })
+
+    if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
+      const originalResultImages = task.result.images
+      const hydratedConversation = await loadConversation(task.userId, task.payload.conversation_id)
+      const taskImageIds = new Set(taskImages.map((image) => image.id))
+      const hydratedImageMap = new Map(
+        hydratedConversation.state.generatedImages
+          .filter((image) => taskImageIds.has(image.id))
+          .map((image) => [image.id, image])
       )
-      await saveConversationState(task.userId, task.payload.conversation_id, {
-        workspaceType: 'ppt',
-        chatMessages: hydratedConversation.state.chatMessages,
-        generatedImages: hydratedConversation.state.generatedImages,
-        pptState: hydratedPptState
-      })
+      task.result = {
+        ...task.result,
+        images: taskImages.map((taskImage, index) => {
+          const originalImage = originalResultImages[index] || {}
+          const hydratedImage = hydratedImageMap.get(taskImage.id)
+          return {
+            id: originalImage.id || `image-${index + 1}`,
+            prompt: hydratedImage?.prompt || taskImage.prompt,
+            size: hydratedImage?.size || taskImage.size,
+            data_url: hydratedImage?.dataUrl || taskImage.dataUrl || null,
+            remote_url: hydratedImage?.remoteUrl || taskImage.remoteUrl || null,
+            image_url: hydratedImage?.image_url || taskImage.image_url || null
+          }
+        })
+      }
     }
-  }
+  })
+
   task.archived = true
   task.updatedAt = nowIso()
   await updatePersistedImageTask(task)
@@ -3447,7 +3461,7 @@ async function loadConversation(userId, conversationId) {
   }
 }
 
-async function saveConversationState(userId, conversationId, state) {
+async function saveConversationStateUnlocked(userId, conversationId, state) {
   const row = await getConversationRow(userId, conversationId)
   if (!row) {
     throw appError(404, 'Conversation not found')
@@ -3477,6 +3491,12 @@ async function saveConversationState(userId, conversationId, state) {
     savedAt: nowIso(),
     title
   }
+}
+
+async function saveConversationState(userId, conversationId, state) {
+  return withConversationMutationLock(userId, conversationId, () => (
+    saveConversationStateUnlocked(userId, conversationId, state)
+  ))
 }
 
 function normalizeLibraryFolder(value) {
