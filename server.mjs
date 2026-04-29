@@ -3493,24 +3493,26 @@ function normalizeRequestedWorkspaceType(value, fallback = 'create') {
 }
 
 async function conversationWorkspaceType(userId, row) {
-  const storedWorkspaceType = normalizeRequestedWorkspaceType(row?.workspace_type, '')
-  if (storedWorkspaceType) {
-    return storedWorkspaceType
-  }
-
   try {
     const snapshotPath = await ensureConversationSnapshotPath(userId, row)
     const snapshot = await readJsonFile(snapshotPath)
-    const workspaceType = normalizeWorkspaceType(snapshot)
-    const pool = requireDb()
-    await pool.query(
-      `UPDATE playground_conversations
-       SET workspace_type = $3
-       WHERE id = $1 AND user_id = $2`,
-      [row.id, userId, workspaceType]
-    )
-    return workspaceType
+    const snapshotWorkspaceType = normalizeWorkspaceType(snapshot)
+    const storedWorkspaceType = normalizeRequestedWorkspaceType(row?.workspace_type, '')
+    if (snapshotWorkspaceType !== storedWorkspaceType) {
+      const pool = requireDb()
+      await pool.query(
+        `UPDATE playground_conversations
+         SET workspace_type = $3
+         WHERE id = $1 AND user_id = $2`,
+        [row.id, userId, snapshotWorkspaceType]
+      )
+    }
+    return snapshotWorkspaceType || storedWorkspaceType || 'create'
   } catch {
+    const storedWorkspaceType = normalizeRequestedWorkspaceType(row?.workspace_type, '')
+    if (storedWorkspaceType) {
+      return storedWorkspaceType
+    }
     return 'create'
   }
 }

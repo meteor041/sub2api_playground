@@ -2182,8 +2182,8 @@ async function saveConversationSnapshot(
   }
 }
 
-async function refreshConversationIndex(workspaceType: WorkspaceType = activeWorkspaceTypeForView(activeView.value)): Promise<void> {
-  conversations.value = sortConversations(await listConversations(workspaceType))
+async function refreshConversationIndex(_workspaceType: WorkspaceType = activeWorkspaceTypeForView(activeView.value)): Promise<void> {
+  conversations.value = sortConversations(await listConversations())
 }
 
 async function loadConversationById(conversationId: string, workspaceType: WorkspaceType = activeWorkspaceTypeForView(activeView.value)): Promise<void> {
