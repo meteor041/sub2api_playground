@@ -3929,6 +3929,12 @@ h2 {
   outline: 1px solid var(--line);
 }
 
+.sprite-role-chip:hover:not(:disabled) {
+  transform: none;
+  box-shadow: none;
+  background: var(--panel-soft-bg);
+}
+
 .sprite-role-chip.active {
   color: var(--accent);
   background: var(--accent-soft);
