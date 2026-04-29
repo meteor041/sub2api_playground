@@ -5930,8 +5930,32 @@ onBeforeUnmount(() => {
         </section>
       </template>
 
-      <div v-else class="creator-layout sprite-layout">
-        <section class="creator-canvas">
+      <div v-else class="sprite-studio-layout">
+        <aside class="panel sprite-nav-column">
+          <div class="work-tab-header">
+            <span class="eyebrow">Sprite Sessions</span>
+            <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
+              新建任务
+            </button>
+          </div>
+          <div class="sessions-list work-scroll">
+            <button
+              v-for="conversation in spriteTaskRecords"
+              :key="conversation.id"
+              class="session-button"
+              :class="{ active: conversation.id === currentConversationId }"
+              type="button"
+              :disabled="conversationBusy"
+              @click="handleSpriteTaskSelect(conversation.id)"
+            >
+              <strong>{{ conversation.title }}</strong>
+              <span>{{ conversation.updatedAt }}</span>
+            </button>
+            <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
+          </div>
+        </aside>
+
+        <section class="sprite-edit-column">
           <div class="sprite-workspace">
             <section class="panel sprite-card">
               <div class="sprite-section-header">
@@ -6020,143 +6044,119 @@ onBeforeUnmount(() => {
               </div>
             </section>
 
-            <div class="sprite-columns">
-              <section class="panel sprite-card">
-                <div class="sprite-section-header">
+            <section class="panel sprite-card">
+              <div class="sprite-section-header">
+                <div>
+                  <p class="eyebrow">Actions</p>
+                  <h2>动作分组</h2>
+                </div>
+                <button class="secondary mini" type="button" :disabled="spriteWorkspaceBusy || !canAddSpriteActionGroup" @click="handleAddSpriteActionGroup">
+                  添加动作
+                </button>
+              </div>
+              <div class="sprite-action-form">
+                <label>
+                  动作
+                  <RoundSelect v-model="spriteActionPreset" title="动作" :options="spriteActionPresets" />
+                </label>
+                <label>
+                  朝向
+                  <RoundSelect v-model="spriteDirectionPreset" title="朝向" :options="spriteDirectionPresets" />
+                </label>
+                <label>
+                  帧数
+                  <input v-model.number="spriteFrameCount" type="number" min="1" max="12" />
+                </label>
+              </div>
+              <div class="sprite-action-list">
+                <article v-for="group in spriteState?.actionGroups || []" :key="group.id" class="sprite-action-item">
                   <div>
-                    <p class="eyebrow">Reference</p>
-                    <h2>参考图锁定</h2>
-                  </div>
-                  <button
-                    v-if="spriteReferenceImage"
-                    class="ghost mini"
-                    type="button"
-                    :disabled="spriteWorkspaceBusy"
-                    @click="handleClearSpriteReference"
-                  >
-                    清除参考图
-                  </button>
-                </div>
-                <div v-if="spriteReferenceImage" class="sprite-reference-card">
-                  <img
-                    :src="imagePreviewUrl(spriteReferenceImage, galleryPreviewWidth)"
-                    :alt="spriteReferenceImage.prompt"
-                    loading="lazy"
-                    @error="handleGeneratedImageError($event, spriteReferenceImage)"
-                    @click="openSpriteReferencePreview"
-                  />
-                  <div class="sprite-reference-copy">
-                    <strong>{{ spriteState?.character?.name || '已锁定参考图' }}</strong>
-                    <span>{{ spriteReferenceImage.size }}</span>
-                    <p>{{ spriteReferenceImage.prompt }}</p>
-                  </div>
-                </div>
-                <p v-else class="empty">当前还没有锁定参考图。后续生成角色设定图后，可以在这里选定一张作为统一参考。</p>
-                <p v-if="generatedImages.length === 0" class="empty">当前 sprite 会话还没有生成图片。先在上方点击“生成角色设定图”。</p>
-                <div class="sprite-reference-gallery">
-                  <button
-                    v-for="(image, index) in generatedImages"
-                    :key="imageShareKey(image, index)"
-                    class="sprite-reference-thumb"
-                    type="button"
-                    :class="{ active: spriteState?.character?.referenceImageId === image.id }"
-                    :disabled="isImageLoading(image) || spriteWorkspaceBusy"
-                    @click="handleSetSpriteReference(image)"
-                  >
-                    <img
-                      v-if="imageSourceUrl(image)"
-                      :src="imagePreviewUrl(image, galleryPreviewWidth)"
-                      :alt="image.prompt"
-                      loading="lazy"
-                      @error="handleGeneratedImageError($event, image)"
-                    />
-                    <span>{{ spriteState?.character?.referenceImageId === image.id ? '已锁定' : '设为参考图' }}</span>
-                  </button>
-                </div>
-              </section>
-
-              <section class="panel sprite-card">
-                <div class="sprite-section-header">
-                  <div>
-                    <p class="eyebrow">Actions</p>
-                    <h2>动作分组</h2>
-                  </div>
-                  <button class="secondary mini" type="button" :disabled="spriteWorkspaceBusy || !canAddSpriteActionGroup" @click="handleAddSpriteActionGroup">
-                    添加动作
-                  </button>
-                </div>
-                <div class="sprite-action-form">
-                  <label>
-                    动作
-                    <RoundSelect v-model="spriteActionPreset" title="动作" :options="spriteActionPresets" />
-                  </label>
-                  <label>
-                    朝向
-                    <RoundSelect v-model="spriteDirectionPreset" title="朝向" :options="spriteDirectionPresets" />
-                  </label>
-                  <label>
-                    帧数
-                    <input v-model.number="spriteFrameCount" type="number" min="1" max="12" />
-                  </label>
-                </div>
-                <div class="sprite-action-list">
-                  <article v-for="group in spriteState?.actionGroups || []" :key="group.id" class="sprite-action-item">
-                    <div>
-                      <strong>{{ spriteActionGroupTitle(group) }}</strong>
-                      <span>{{ group.frameCount }} 帧 · {{ group.frames.length }} 已挂载 · {{ group.status }}</span>
-                      <div v-if="group.frames.length > 0" class="sprite-frame-chips">
-                        <button
-                          v-for="frame in group.frames"
-                          :key="frame.id"
-                          class="sprite-frame-chip"
-                          type="button"
-                          @click="openSpriteFramePreview(frame.imageId)"
-                        >
-                          第 {{ frame.frameIndex + 1 }} 帧
-                        </button>
-                      </div>
-                    </div>
-                    <div class="sprite-action-item-actions">
-                      <button class="secondary mini" type="button" :disabled="imageBusy || spriteWorkspaceBusy || !spriteReferenceImage" @click="handleGenerateSpriteActionFrame(group.id)">
-                        生成下一帧
-                      </button>
-                      <button class="ghost mini" type="button" :disabled="group.frames.length === 0" @click="exportSpriteSheet(group)">
-                        导出 Sheet + JSON
-                      </button>
-                      <button class="ghost mini" type="button" :disabled="spriteWorkspaceBusy" @click="handleRemoveSpriteActionGroup(group.id)">
-                        删除
+                    <strong>{{ spriteActionGroupTitle(group) }}</strong>
+                    <span>{{ group.frameCount }} 帧 · {{ group.frames.length }} 已挂载 · {{ group.status }}</span>
+                    <div v-if="group.frames.length > 0" class="sprite-frame-chips">
+                      <button
+                        v-for="frame in group.frames"
+                        :key="frame.id"
+                        class="sprite-frame-chip"
+                        type="button"
+                        @click="openSpriteFramePreview(frame.imageId)"
+                      >
+                        第 {{ frame.frameIndex + 1 }} 帧
                       </button>
                     </div>
-                  </article>
-                  <p v-if="(spriteState?.actionGroups || []).length === 0" class="empty">先保存角色设定，再为该角色规划待机、行走、攻击等动作分组。</p>
-                </div>
-              </section>
-            </div>
+                  </div>
+                  <div class="sprite-action-item-actions">
+                    <button class="secondary mini" type="button" :disabled="imageBusy || spriteWorkspaceBusy || !spriteReferenceImage" @click="handleGenerateSpriteActionFrame(group.id)">
+                      生成下一帧
+                    </button>
+                    <button class="ghost mini" type="button" :disabled="group.frames.length === 0" @click="exportSpriteSheet(group)">
+                      导出 Sheet + JSON
+                    </button>
+                    <button class="ghost mini" type="button" :disabled="spriteWorkspaceBusy" @click="handleRemoveSpriteActionGroup(group.id)">
+                      删除
+                    </button>
+                  </div>
+                </article>
+                <p v-if="(spriteState?.actionGroups || []).length === 0" class="empty">先保存角色设定，再为该角色规划待机、行走、攻击等动作分组。</p>
+              </div>
+            </section>
           </div>
         </section>
 
-        <aside class="work-sidebar panel">
-          <div class="work-tab-header">
-            <span class="eyebrow">Sprite Sessions</span>
-            <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
-              新建任务
-            </button>
-          </div>
-          <div class="sessions-list work-scroll">
-            <button
-              v-for="conversation in spriteTaskRecords"
-              :key="conversation.id"
-              class="session-button"
-              :class="{ active: conversation.id === currentConversationId }"
-              type="button"
-              :disabled="conversationBusy"
-              @click="handleSpriteTaskSelect(conversation.id)"
-            >
-              <strong>{{ conversation.title }}</strong>
-              <span>{{ conversation.updatedAt }}</span>
-            </button>
-            <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
-          </div>
+        <aside class="sprite-preview-column">
+          <section class="panel sprite-card sprite-preview-card">
+            <div class="sprite-section-header">
+              <div>
+                <p class="eyebrow">Preview</p>
+                <h2>预览区</h2>
+              </div>
+              <button
+                v-if="spriteReferenceImage"
+                class="ghost mini"
+                type="button"
+                :disabled="spriteWorkspaceBusy"
+                @click="handleClearSpriteReference"
+              >
+                清除参考图
+              </button>
+            </div>
+            <div v-if="spriteReferenceImage" class="sprite-reference-card">
+              <img
+                :src="imagePreviewUrl(spriteReferenceImage, galleryPreviewWidth)"
+                :alt="spriteReferenceImage.prompt"
+                loading="lazy"
+                @error="handleGeneratedImageError($event, spriteReferenceImage)"
+                @click="openSpriteReferencePreview"
+              />
+              <div class="sprite-reference-copy">
+                <strong>{{ spriteState?.character?.name || '已锁定参考图' }}</strong>
+                <span>{{ spriteReferenceImage.size }}</span>
+                <p>{{ spriteReferenceImage.prompt }}</p>
+              </div>
+            </div>
+            <p v-else class="empty">当前还没有锁定参考图。后续生成角色设定图后，可以在这里选定一张作为统一参考。</p>
+            <p v-if="generatedImages.length === 0" class="empty">当前 sprite 会话还没有生成图片。先在编辑区点击“生成角色设定图”。</p>
+            <div class="sprite-reference-gallery">
+              <button
+                v-for="(image, index) in generatedImages"
+                :key="imageShareKey(image, index)"
+                class="sprite-reference-thumb"
+                type="button"
+                :class="{ active: spriteState?.character?.referenceImageId === image.id }"
+                :disabled="isImageLoading(image) || spriteWorkspaceBusy"
+                @click="handleSetSpriteReference(image)"
+              >
+                <img
+                  v-if="imageSourceUrl(image)"
+                  :src="imagePreviewUrl(image, galleryPreviewWidth)"
+                  :alt="image.prompt"
+                  loading="lazy"
+                  @error="handleGeneratedImageError($event, image)"
+                />
+                <span>{{ spriteState?.character?.referenceImageId === image.id ? '已锁定' : '设为参考图' }}</span>
+              </button>
+            </div>
+          </section>
         </aside>
       </div>
     </section>
