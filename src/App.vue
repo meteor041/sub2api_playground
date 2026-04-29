@@ -95,6 +95,11 @@ const spriteActionPresets = [
   { value: 'hurt', label: '受击' },
   { value: 'jump', label: '跳跃' }
 ]
+const spriteRoleOptions = [
+  { value: '主角', label: '主角' },
+  { value: '敌人', label: '敌人' },
+  { value: 'NPC', label: 'NPC' }
+]
 const spriteDirectionPresets = [
   { value: 'front', label: '正面' },
   { value: 'side', label: '侧面' },
@@ -6004,8 +6009,19 @@ onBeforeUnmount(() => {
                   <input v-model="spriteCharacterForm.name" type="text" maxlength="80" placeholder="例如：雾港游侠" />
                 </label>
                 <label>
-                  角色定位
-                  <input v-model="spriteCharacterForm.archetype" type="text" maxlength="120" placeholder="例如：双枪斥候 / 女主角" />
+                  角色类型
+                  <div class="sprite-role-picker">
+                    <button
+                      v-for="option in spriteRoleOptions"
+                      :key="option.value"
+                      class="sprite-role-chip"
+                      :class="{ active: spriteCharacterForm.archetype === option.value }"
+                      type="button"
+                      @click="spriteCharacterForm.archetype = option.value"
+                    >
+                      {{ option.label }}
+                    </button>
+                  </div>
                 </label>
                 <label class="sprite-form-span-2">
                   外观描述
