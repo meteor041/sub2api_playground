@@ -4326,6 +4326,34 @@ const server = createServer(async (req, res) => {
       }
       const filePath = assetAbsolutePath(asset.file_path)
       if (!existsSync(filePath)) {
+        if (wantsDownload) {
+          if (req.method === 'HEAD') {
+            res.writeHead(200, {
+              'Content-Disposition': buildAttachmentDisposition(buildAssetDownloadFilename(asset, downloadName)),
+              'Content-Type': asset.mime_type
+            })
+            res.end()
+            return
+          }
+          if (r2Configured) {
+            await streamAssetFromR2(res, asset, { downloadName })
+            return
+          }
+          const remoteUrl = assetImageUrl(asset.public_token)
+          if (!remoteUrl) {
+            throw appError(404, 'Asset file not found')
+          }
+          const { buffer, mimeType } = await fetchImageUrlBuffer(remoteUrl, asset.mime_type || 'image/png')
+          res.writeHead(200, {
+            'Cache-Control': 'public, max-age=31536000, immutable',
+            'CDN-Cache-Control': 'public, max-age=31536000, immutable',
+            'Content-Disposition': buildAttachmentDisposition(buildAssetDownloadFilename(asset, downloadName)),
+            'Content-Length': String(buffer.length),
+            'Content-Type': mimeType || asset.mime_type
+          })
+          res.end(buffer)
+          return
+        }
         if (!r2Configured) {
           throw appError(404, 'Asset file not found')
         }

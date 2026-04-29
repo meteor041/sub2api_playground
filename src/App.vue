@@ -679,6 +679,30 @@ function isSameOriginUrl(value: string): boolean {
   }
 }
 
+function assetTokenFromSource(source: string): string {
+  if (!source || source.startsWith('data:') || source.startsWith('blob:')) {
+    return ''
+  }
+
+  try {
+    const url = new URL(source, window.location.href)
+    const assetMatch = url.pathname.match(/\/api\/playground\/assets\/([^/?#]+)/)
+    if (assetMatch) {
+      return decodeURIComponent(assetMatch[1])
+    }
+
+    const meteorImagesIndex = url.pathname.indexOf('/meteor-images/')
+    if (meteorImagesIndex >= 0) {
+      const token = url.pathname.slice(meteorImagesIndex + '/meteor-images/'.length).split('/')[0]
+      return token ? decodeURIComponent(token) : ''
+    }
+  } catch {
+    return ''
+  }
+
+  return ''
+}
+
 function buildNativeDownloadHref(source: string, filename = ''): string {
   if (!source || source.startsWith('data:') || source.startsWith('blob:')) {
     return source
@@ -686,6 +710,16 @@ function buildNativeDownloadHref(source: string, filename = ''): string {
 
   try {
     const url = new URL(source, window.location.href)
+    const assetToken = assetTokenFromSource(source)
+    if (assetToken) {
+      const downloadUrl = new URL(`/api/playground/assets/${encodeURIComponent(assetToken)}`, window.location.href)
+      downloadUrl.searchParams.set('download', '1')
+      if (filename.trim()) {
+        downloadUrl.searchParams.set('filename', filename)
+      }
+      return `${downloadUrl.pathname}${downloadUrl.search}${downloadUrl.hash}`
+    }
+
     if (url.origin === window.location.origin && url.pathname.startsWith('/api/playground/assets/')) {
       url.searchParams.set('download', '1')
       if (filename.trim()) {
