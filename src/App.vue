@@ -6106,11 +6106,11 @@ onBeforeUnmount(() => {
               <div class="sprite-action-form">
                 <label>
                   动作
-                  <RoundSelect v-model="spriteActionPreset" title="动作" :options="spriteActionPresets" />
+                    <RoundSelect v-model="spriteActionPreset" title="动作" :options="spriteActionPresets" :show-stepper="false" />
                 </label>
                 <label>
                   朝向
-                  <RoundSelect v-model="spriteDirectionPreset" title="朝向" :options="spriteDirectionPresets" />
+                    <RoundSelect v-model="spriteDirectionPreset" title="朝向" :options="spriteDirectionPresets" :show-stepper="false" />
                 </label>
                 <label>
                   帧数
@@ -6825,6 +6825,7 @@ onBeforeUnmount(() => {
                 v-model="selectedTextModel"
                 title="文字模型"
                 :options="textModelOptions"
+                :show-stepper="false"
               />
               <details v-if="createMode === 'chat' && displayImageCompareGroup" class="compare-inline-menu">
                 <summary>
@@ -6852,6 +6853,7 @@ onBeforeUnmount(() => {
                 v-model="imageSize"
                 title="图片尺寸"
                 :options="imageSizeOptions"
+                :show-stepper="false"
               />
               <RoundSelect
                 v-model="selectedApiKeyId"
