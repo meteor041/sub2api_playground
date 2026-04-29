@@ -3452,8 +3452,9 @@ async function hydrateConversationState(snapshot, workspaceType = normalizeWorks
   for (const image of normalized.generatedImages) {
     let dataUrl
     let assetToken
+    let hydrated = null
     if (image.assetToken) {
-      const hydrated = await hydrateAssetRef({
+      hydrated = await hydrateAssetRef({
         assetToken: image.assetToken,
         id: image.id,
         mimeType: image.mimeType || 'image/png',
