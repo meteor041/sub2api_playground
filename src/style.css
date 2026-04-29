@@ -3894,11 +3894,6 @@ h2 {
   align-items: center;
 }
 
-.sprite-inline-select {
-  width: 180px;
-  min-width: 0;
-}
-
 .sprite-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3909,47 +3904,18 @@ h2 {
   grid-column: 1 / -1;
 }
 
-.sprite-detail-box {
-  border: 1px solid var(--line);
-  border-radius: 18px;
-  background: var(--panel-soft-bg);
-}
-
-.sprite-detail-box summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0.9rem 1rem;
-  cursor: pointer;
-  list-style: none;
-  font-weight: 700;
-}
-
-.sprite-detail-box summary::-webkit-details-marker {
-  display: none;
-}
-
-.sprite-detail-box summary svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 160ms ease;
-}
-
-.sprite-detail-box[open] summary svg {
-  transform: rotate(180deg);
-}
-
 .sprite-detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
-  padding: 0 14px 14px;
+}
+
+.sprite-advanced-hint {
+  display: grid;
+  align-content: center;
+  min-height: 100%;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .sprite-generate-bar {

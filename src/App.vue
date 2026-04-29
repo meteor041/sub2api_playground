@@ -5986,13 +5986,10 @@ onBeforeUnmount(() => {
             <section class="panel sprite-card">
               <div class="sprite-section-header">
                 <div>
-                  <p class="eyebrow">Character</p>
-                  <h2>角色设定</h2>
+                  <p class="eyebrow">Character Editor</p>
+                  <h2>角色基础</h2>
                 </div>
                 <div class="sprite-inline-actions">
-                  <div class="sprite-inline-select">
-                    <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
-                  </div>
                   <button class="ghost mini" type="button" :disabled="spriteWorkspaceBusy" @click="resetSpriteCharacterForm">
                     重置表单
                   </button>
@@ -6014,66 +6011,57 @@ onBeforeUnmount(() => {
                   外观描述
                   <textarea v-model="spriteCharacterForm.description" rows="4" placeholder="描述整体外观、气质、年龄感和辨识度"></textarea>
                 </label>
-                <details class="sprite-detail-box sprite-form-span-2">
-                  <summary>
-                    <span>更多角色细节</span>
-                    <svg viewBox="0 0 24 24" aria-hidden="true">
-                      <path d="M6 9l6 6 6-6" />
-                    </svg>
-                  </summary>
-                  <div class="sprite-detail-grid">
-                    <label>
-                      发型
-                      <input v-model="spriteCharacterForm.hair" type="text" maxlength="120" placeholder="短银发，右侧剃边" />
-                    </label>
-                    <label>
-                      面部特征
-                      <input v-model="spriteCharacterForm.faceTraits" type="text" maxlength="120" placeholder="锐利眼型，左眉有浅疤" />
-                    </label>
-                    <label>
-                      服装
-                      <input v-model="spriteCharacterForm.costume" type="text" maxlength="160" placeholder="短斗篷、轻甲、腰间工具包" />
-                    </label>
-                    <label>
-                      配件 / 武器
-                      <input v-model="spriteCharacterForm.accessories" type="text" maxlength="160" placeholder="双枪、护目镜、机械手套" />
-                    </label>
-                    <label>
-                      主配色
-                      <input v-model="spriteCharacterForm.palette" type="text" maxlength="120" placeholder="煤灰、铜橙、冰蓝高光" />
-                    </label>
-                    <label>
-                      体型
-                      <input v-model="spriteCharacterForm.bodyType" type="text" maxlength="120" placeholder="修长、敏捷、轻量级" />
-                    </label>
-                    <label>
-                      比例
-                      <input v-model="spriteCharacterForm.proportions" type="text" maxlength="120" placeholder="7.5 头身，长腿短躯干" />
-                    </label>
-                    <label>
-                      画风
-                      <input v-model="spriteCharacterForm.visualStyle" type="text" maxlength="160" placeholder="2D 游戏美术，清晰轮廓，适合角色资产制作" />
-                    </label>
-                    <label class="sprite-form-span-2">
-                      负面约束
-                      <textarea v-model="spriteCharacterForm.negativePrompt" rows="3" placeholder="例如：避免多余角色、避免复杂背景、避免截断肢体"></textarea>
-                    </label>
-                  </div>
-                </details>
-              </div>
-              <div class="sprite-generate-bar">
-                <button class="secondary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
-                  {{ imageBusy ? (imageTaskLabel || '处理中...') : '生成角色设定图' }}
-                </button>
-                <span>{{ selectedKeySecret ? '将使用当前已选 API Key 在 sprite 会话中生成参考图。' : '请先选择可用的 OpenAI API Key。' }}</span>
               </div>
             </section>
 
             <section class="panel sprite-card">
               <div class="sprite-section-header">
                 <div>
-                  <p class="eyebrow">Actions</p>
-                  <h2>动作分组</h2>
+                  <p class="eyebrow">Appearance</p>
+                  <h2>外观设计</h2>
+                </div>
+              </div>
+              <div class="sprite-detail-grid">
+                <label>
+                  发型
+                  <input v-model="spriteCharacterForm.hair" type="text" maxlength="120" placeholder="短银发，右侧剃边" />
+                </label>
+                <label>
+                  面部特征
+                  <input v-model="spriteCharacterForm.faceTraits" type="text" maxlength="120" placeholder="锐利眼型，左眉有浅疤" />
+                </label>
+                <label>
+                  服装
+                  <input v-model="spriteCharacterForm.costume" type="text" maxlength="160" placeholder="短斗篷、轻甲、腰间工具包" />
+                </label>
+                <label>
+                  配件 / 武器
+                  <input v-model="spriteCharacterForm.accessories" type="text" maxlength="160" placeholder="双枪、护目镜、机械手套" />
+                </label>
+                <label>
+                  主配色
+                  <input v-model="spriteCharacterForm.palette" type="text" maxlength="120" placeholder="煤灰、铜橙、冰蓝高光" />
+                </label>
+                <label>
+                  体型
+                  <input v-model="spriteCharacterForm.bodyType" type="text" maxlength="120" placeholder="修长、敏捷、轻量级" />
+                </label>
+                <label>
+                  比例
+                  <input v-model="spriteCharacterForm.proportions" type="text" maxlength="120" placeholder="7.5 头身，长腿短躯干" />
+                </label>
+                <label>
+                  画风
+                  <input v-model="spriteCharacterForm.visualStyle" type="text" maxlength="160" placeholder="2D 游戏美术，清晰轮廓，适合角色资产制作" />
+                </label>
+              </div>
+            </section>
+
+            <section class="panel sprite-card">
+              <div class="sprite-section-header">
+                <div>
+                  <p class="eyebrow">Action System</p>
+                  <h2>动作系统</h2>
                 </div>
                 <button class="secondary mini" type="button" :disabled="spriteWorkspaceBusy || !canAddSpriteActionGroup" @click="handleAddSpriteActionGroup">
                   添加动作
@@ -6123,6 +6111,33 @@ onBeforeUnmount(() => {
                   </div>
                 </article>
                 <p v-if="(spriteState?.actionGroups || []).length === 0" class="empty">先保存角色设定，再为该角色规划待机、行走、攻击等动作分组。</p>
+              </div>
+            </section>
+
+            <section class="panel sprite-card">
+              <div class="sprite-section-header">
+                <div>
+                  <p class="eyebrow">Advanced</p>
+                  <h2>高级设置</h2>
+                </div>
+              </div>
+              <div class="sprite-detail-grid">
+                <label>
+                  设定图尺寸
+                  <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
+                </label>
+                <div class="sprite-advanced-hint">
+                  <span>{{ selectedKeySecret ? '将使用当前已选 API Key 在 sprite 会话中生成参考图。' : '请先选择可用的 OpenAI API Key。' }}</span>
+                </div>
+                <label class="sprite-form-span-2">
+                  负面约束
+                  <textarea v-model="spriteCharacterForm.negativePrompt" rows="3" placeholder="例如：避免多余角色、避免复杂背景、避免截断肢体"></textarea>
+                </label>
+              </div>
+              <div class="sprite-generate-bar">
+                <button class="secondary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
+                  {{ imageBusy ? (imageTaskLabel || '处理中...') : '生成角色设定图' }}
+                </button>
               </div>
             </section>
           </div>
