@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RoundSelect from './components/RoundSelect.vue'
-import logoUrl from '../asset/logo.png'
+import logoUrl from '../asset/ChatGPT Image 2026年4月30日 03_16_45.png'
 import {
   batchUpdateLibraryItems,
   createConversation,
