@@ -3846,6 +3846,7 @@ h2 {
 }
 
 .sprite-recent-projects {
+  min-height: 96px;
   padding: 0;
   overflow: hidden;
 }
@@ -3882,7 +3883,13 @@ h2 {
 .sprite-recent-projects-list {
   display: grid;
   gap: 8px;
+  min-height: 72px;
+  align-content: start;
   padding: 0 12px 12px;
+}
+
+.sprite-recent-projects-list .empty {
+  padding: 8px 2px 2px;
 }
 
 .sprite-card {
