@@ -328,6 +328,7 @@ async function ensureRuntime() {
     CREATE TABLE IF NOT EXISTS playground_conversations (
       id UUID PRIMARY KEY,
       user_id BIGINT NOT NULL,
+      workspace_type TEXT NOT NULL DEFAULT 'create',
       title TEXT NOT NULL DEFAULT '新会话',
       snapshot_path TEXT NOT NULL,
       last_message_at TIMESTAMPTZ,
@@ -337,8 +338,18 @@ async function ensureRuntime() {
   `)
 
   await db.query(`
+    ALTER TABLE playground_conversations
+    ADD COLUMN IF NOT EXISTS workspace_type TEXT NOT NULL DEFAULT 'create'
+  `)
+
+  await db.query(`
     CREATE INDEX IF NOT EXISTS idx_playground_conversations_user_updated
     ON playground_conversations (user_id, updated_at DESC)
+  `)
+
+  await db.query(`
+    CREATE INDEX IF NOT EXISTS idx_playground_conversations_user_workspace_updated
+    ON playground_conversations (user_id, workspace_type, updated_at DESC)
   `)
 
   await db.query(`
@@ -2817,10 +2828,11 @@ async function archiveImageTaskToConversation(task) {
       : (conversation.state.pptState || null)
 
     await saveConversationStateUnlocked(task.userId, task.payload.conversation_id, {
-      workspaceType: conversation.state.workspaceType === 'ppt' ? 'ppt' : 'create',
+      workspaceType: normalizeWorkspaceType(conversation.state),
       chatMessages: nextMessages,
       generatedImages: nextImages,
-      pptState: nextPptState
+      pptState: nextPptState,
+      spriteState: conversation.state.spriteState || null
     })
 
     if (task.status === 'completed' && taskImages.length > 0 && Array.isArray(task.result?.images)) {
@@ -3118,6 +3130,12 @@ function cleanupTasks() {
 }
 
 function deriveConversationTitle(state) {
+  const spriteState = state?.spriteState && typeof state.spriteState === 'object' ? state.spriteState : null
+  const characterName = typeof spriteState?.character?.name === 'string' ? spriteState.character.name.trim() : ''
+  if (characterName) {
+    return characterName.slice(0, 48)
+  }
+
   const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
   const firstUserMessage = chatMessages.find((message) => message?.role === 'user' && typeof message?.content === 'string' && message.content.trim())
   if (firstUserMessage) {
@@ -3138,13 +3156,17 @@ function deriveConversationTitle(state) {
 }
 
 function normalizeWorkspaceType(state) {
-  if (state?.workspaceType === 'create' || state?.workspaceType === 'ppt') {
+  if (state?.workspaceType === 'create' || state?.workspaceType === 'ppt' || state?.workspaceType === 'sprite') {
     return state.workspaceType
   }
 
+  const hasSprite = Boolean(state?.spriteState && typeof state.spriteState === 'object' && !Array.isArray(state.spriteState))
   const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
   const generatedImages = Array.isArray(state?.generatedImages) ? state.generatedImages : []
   const hasPpt = Boolean(state?.pptState && typeof state.pptState === 'object' && !Array.isArray(state.pptState))
+  if (hasSprite) {
+    return 'sprite'
+  }
   if (chatMessages.length > 0 || generatedImages.length > 0) {
     return 'create'
   }
@@ -3161,6 +3183,9 @@ function stateEnvelope(state) {
     generatedImages: Array.isArray(state?.generatedImages) ? state.generatedImages : [],
     pptState: state?.pptState && typeof state.pptState === 'object' && !Array.isArray(state.pptState)
       ? state.pptState
+      : null,
+    spriteState: state?.spriteState && typeof state.spriteState === 'object' && !Array.isArray(state.spriteState)
+      ? state.spriteState
       : null
   }
 }
@@ -3184,8 +3209,98 @@ function normalizePptState(state) {
   }
 }
 
-async function normalizeStateForStorage(userId, state) {
+function normalizeSpriteState(state) {
+  if (!state || typeof state !== 'object' || Array.isArray(state)) {
+    return null
+  }
+
+  const character = state.character && typeof state.character === 'object' && !Array.isArray(state.character)
+    ? {
+      id: typeof state.character.id === 'string' ? state.character.id : randomUUID(),
+      name: typeof state.character.name === 'string' ? state.character.name : '',
+      archetype: typeof state.character.archetype === 'string' ? state.character.archetype : '',
+      visualStyle: typeof state.character.visualStyle === 'string' ? state.character.visualStyle : '',
+      description: typeof state.character.description === 'string' ? state.character.description : '',
+      negativePrompt: typeof state.character.negativePrompt === 'string' ? state.character.negativePrompt : '',
+      palette: typeof state.character.palette === 'string' ? state.character.palette : '',
+      costume: typeof state.character.costume === 'string' ? state.character.costume : '',
+      bodyType: typeof state.character.bodyType === 'string' ? state.character.bodyType : '',
+      faceTraits: typeof state.character.faceTraits === 'string' ? state.character.faceTraits : '',
+      hair: typeof state.character.hair === 'string' ? state.character.hair : '',
+      accessories: typeof state.character.accessories === 'string' ? state.character.accessories : '',
+      proportions: typeof state.character.proportions === 'string' ? state.character.proportions : '',
+      referenceImageId: typeof state.character.referenceImageId === 'string' ? state.character.referenceImageId : '',
+      referenceImageAssetToken: typeof state.character.referenceImageAssetToken === 'string' ? state.character.referenceImageAssetToken : '',
+      createdAt: Number.isFinite(Number(state.character.createdAt)) ? Number(state.character.createdAt) : Date.now(),
+      updatedAt: Number.isFinite(Number(state.character.updatedAt)) ? Number(state.character.updatedAt) : Date.now()
+    }
+    : null
+
+  const actionGroups = Array.isArray(state.actionGroups)
+    ? state.actionGroups.map((group, index) => ({
+      id: typeof group?.id === 'string' ? group.id : `sprite-action-${index + 1}`,
+      action: typeof group?.action === 'string' ? group.action : '',
+      direction: typeof group?.direction === 'string' ? group.direction : '',
+      frameCount: Number.isFinite(Number(group?.frameCount)) ? Math.max(0, Number(group.frameCount)) : 0,
+      status: ['draft', 'generating', 'ready', 'failed'].includes(group?.status) ? group.status : 'draft',
+      frames: Array.isArray(group?.frames)
+        ? group.frames.map((frame, frameIndex) => ({
+          id: typeof frame?.id === 'string' ? frame.id : `${typeof group?.id === 'string' ? group.id : `sprite-action-${index + 1}`}-frame-${frameIndex + 1}`,
+          action: typeof frame?.action === 'string' ? frame.action : (typeof group?.action === 'string' ? group.action : ''),
+          direction: typeof frame?.direction === 'string' ? frame.direction : (typeof group?.direction === 'string' ? group.direction : ''),
+          frameIndex: Number.isFinite(Number(frame?.frameIndex)) ? Number(frame.frameIndex) : frameIndex,
+          imageId: typeof frame?.imageId === 'string' ? frame.imageId : '',
+          prompt: typeof frame?.prompt === 'string' ? frame.prompt : '',
+          createdAt: Number.isFinite(Number(frame?.createdAt)) ? Number(frame.createdAt) : Date.now()
+        }))
+        : []
+    }))
+    : []
+
+  const sheets = Array.isArray(state.sheets)
+    ? state.sheets.map((sheet, index) => ({
+      id: typeof sheet?.id === 'string' ? sheet.id : `sprite-sheet-${index + 1}`,
+      actionGroupId: typeof sheet?.actionGroupId === 'string' ? sheet.actionGroupId : '',
+      imageAssetToken: typeof sheet?.imageAssetToken === 'string' ? sheet.imageAssetToken : '',
+      jsonAssetToken: typeof sheet?.jsonAssetToken === 'string' ? sheet.jsonAssetToken : '',
+      frameWidth: Number.isFinite(Number(sheet?.frameWidth)) ? Math.max(0, Number(sheet.frameWidth)) : 0,
+      frameHeight: Number.isFinite(Number(sheet?.frameHeight)) ? Math.max(0, Number(sheet.frameHeight)) : 0,
+      columns: Number.isFinite(Number(sheet?.columns)) ? Math.max(0, Number(sheet.columns)) : 0,
+      rows: Number.isFinite(Number(sheet?.rows)) ? Math.max(0, Number(sheet.rows)) : 0,
+      createdAt: Number.isFinite(Number(sheet?.createdAt)) ? Number(sheet.createdAt) : Date.now()
+    }))
+    : []
+
+  return {
+    character,
+    actionGroups,
+    sheets
+  }
+}
+
+function coerceConversationStateForWorkspace(workspaceType, state) {
   const normalized = stateEnvelope(state)
+  if (workspaceType === 'ppt') {
+    return {
+      ...normalized,
+      spriteState: null
+    }
+  }
+  if (workspaceType === 'sprite') {
+    return {
+      ...normalized,
+      pptState: null
+    }
+  }
+  return {
+    ...normalized,
+    pptState: null,
+    spriteState: null
+  }
+}
+
+async function normalizeStateForStorage(userId, state, workspaceType = normalizeWorkspaceType(state)) {
+  const normalized = coerceConversationStateForWorkspace(workspaceType, state)
   const storedMessages = []
 
   for (const message of normalized.chatMessages) {
@@ -3275,15 +3390,16 @@ async function normalizeStateForStorage(userId, state) {
   }
 
   return {
-    workspaceType: normalizeWorkspaceType(normalized),
+    workspaceType,
     chatMessages: storedMessages,
     generatedImages: storedGeneratedImages,
-    pptState: normalizePptState(normalized.pptState)
+    pptState: normalizePptState(normalized.pptState),
+    spriteState: normalizeSpriteState(normalized.spriteState)
   }
 }
 
-async function hydrateConversationState(snapshot) {
-  const normalized = stateEnvelope(snapshot)
+async function hydrateConversationState(snapshot, workspaceType = normalizeWorkspaceType(snapshot)) {
+  const normalized = coerceConversationStateForWorkspace(workspaceType, snapshot)
   const chatMessages = []
 
   for (const message of normalized.chatMessages) {
@@ -3364,34 +3480,53 @@ async function hydrateConversationState(snapshot) {
   }
 
   return {
-    workspaceType: normalizeWorkspaceType(normalized),
+    workspaceType,
     chatMessages,
     generatedImages,
-    pptState: normalizePptState(normalized.pptState)
+    pptState: normalizePptState(normalized.pptState),
+    spriteState: normalizeSpriteState(normalized.spriteState)
   }
 }
 
+function normalizeRequestedWorkspaceType(value, fallback = 'create') {
+  return value === 'ppt' || value === 'sprite' || value === 'create' ? value : fallback
+}
+
 async function conversationWorkspaceType(userId, row) {
+  const storedWorkspaceType = normalizeRequestedWorkspaceType(row?.workspace_type, '')
+  if (storedWorkspaceType) {
+    return storedWorkspaceType
+  }
+
   try {
     const snapshotPath = await ensureConversationSnapshotPath(userId, row)
     const snapshot = await readJsonFile(snapshotPath)
-    return normalizeWorkspaceType(snapshot)
+    const workspaceType = normalizeWorkspaceType(snapshot)
+    const pool = requireDb()
+    await pool.query(
+      `UPDATE playground_conversations
+       SET workspace_type = $3
+       WHERE id = $1 AND user_id = $2`,
+      [row.id, userId, workspaceType]
+    )
+    return workspaceType
   } catch {
     return 'create'
   }
 }
 
-async function listConversations(userId) {
+async function listConversations(userId, workspaceType = '') {
   const pool = requireDb()
+  const normalizedWorkspaceType = normalizeRequestedWorkspaceType(workspaceType, '')
   const result = await pool.query(
-    `SELECT id, title, created_at, updated_at, last_message_at
+    `SELECT id, title, workspace_type, created_at, updated_at, last_message_at
      FROM playground_conversations
      WHERE user_id = $1
      ORDER BY updated_at DESC`,
     [userId]
   )
 
-  return Promise.all(result.rows.map(async (row) => ({
+  const conversations = await Promise.all(result.rows.map(async (row) => ({
     id: row.id,
     title: row.title,
     workspaceType: await conversationWorkspaceType(userId, row),
@@ -3399,27 +3534,32 @@ async function listConversations(userId) {
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at
   })))
+
+  return normalizedWorkspaceType
+    ? conversations.filter((conversation) => conversation.workspaceType === normalizedWorkspaceType)
+    : conversations
 }
 
 async function createConversation(userId, requestedTitle = '', workspaceType = 'create') {
   const pool = requireDb()
   const id = randomUUID()
+  const normalizedWorkspaceType = normalizeRequestedWorkspaceType(workspaceType)
   const title = requestedTitle.trim() || '新会话'
   const snapshotPath = conversationSnapshotPath(userId, id)
-  await writeJsonFile(snapshotPath, stateEnvelope({ workspaceType }))
+  await writeJsonFile(snapshotPath, coerceConversationStateForWorkspace(normalizedWorkspaceType, { workspaceType: normalizedWorkspaceType }))
 
   const result = await pool.query(
-    `INSERT INTO playground_conversations (id, user_id, title, snapshot_path, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, NOW(), NOW())
-     RETURNING id, title, created_at, updated_at, last_message_at`,
-    [id, userId, title, snapshotPath]
+    `INSERT INTO playground_conversations (id, user_id, workspace_type, title, snapshot_path, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+     RETURNING id, title, workspace_type, created_at, updated_at, last_message_at`,
+    [id, userId, normalizedWorkspaceType, title, snapshotPath]
   )
 
   const row = result.rows[0]
   return {
     id: row.id,
     title: row.title,
-    workspaceType,
+    workspaceType: normalizedWorkspaceType,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastMessageAt: row.last_message_at
@@ -3429,7 +3569,7 @@ async function createConversation(userId, requestedTitle = '', workspaceType = '
 async function getConversationRow(userId, conversationId) {
   const pool = requireDb()
   const result = await pool.query(
-    `SELECT id, title, snapshot_path, created_at, updated_at, last_message_at
+    `SELECT id, title, workspace_type, snapshot_path, created_at, updated_at, last_message_at
      FROM playground_conversations
      WHERE id = $1 AND user_id = $2`,
     [conversationId, userId]
@@ -3462,21 +3602,27 @@ async function ensureConversationSnapshotPath(userId, row) {
   return storedPath || expectedPath
 }
 
-async function loadConversation(userId, conversationId) {
+async function loadConversation(userId, conversationId, requestedWorkspaceType = '') {
   const row = await getConversationRow(userId, conversationId)
   if (!row) {
     throw appError(404, 'Conversation not found')
   }
 
+  const workspaceType = await conversationWorkspaceType(userId, row)
+  const normalizedRequestedWorkspaceType = normalizeRequestedWorkspaceType(requestedWorkspaceType, '')
+  if (normalizedRequestedWorkspaceType && normalizedRequestedWorkspaceType !== workspaceType) {
+    throw appError(404, 'Conversation not found in this workspace')
+  }
+
   const snapshotPath = await ensureConversationSnapshotPath(userId, row)
   const snapshot = await readJsonFile(snapshotPath)
-  const state = await hydrateConversationState(snapshot)
+  const state = await hydrateConversationState(snapshot, workspaceType)
 
   return {
     conversation: {
       id: row.id,
       title: row.title,
-      workspaceType: normalizeWorkspaceType(state),
+      workspaceType,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       lastMessageAt: row.last_message_at
@@ -3491,7 +3637,12 @@ async function saveConversationStateUnlocked(userId, conversationId, state) {
     throw appError(404, 'Conversation not found')
   }
 
-  const normalizedSnapshot = await normalizeStateForStorage(userId, state)
+  const workspaceType = await conversationWorkspaceType(userId, row)
+  if (normalizeRequestedWorkspaceType(state?.workspaceType, workspaceType) !== workspaceType) {
+    throw appError(400, 'workspaceType does not match the target conversation')
+  }
+
+  const normalizedSnapshot = await normalizeStateForStorage(userId, state, workspaceType)
   const title = deriveConversationTitle(normalizedSnapshot)
   const chatMessages = Array.isArray(normalizedSnapshot.chatMessages) ? normalizedSnapshot.chatMessages : []
   const lastMessageAt = chatMessages.length > 0
@@ -3504,10 +3655,11 @@ async function saveConversationStateUnlocked(userId, conversationId, state) {
   await pool.query(
     `UPDATE playground_conversations
      SET title = $3,
-         last_message_at = $4,
+         workspace_type = $4,
+         last_message_at = $5,
          updated_at = NOW()
      WHERE id = $1 AND user_id = $2`,
-    [conversationId, userId, title, lastMessageAt]
+    [conversationId, userId, title, workspaceType, lastMessageAt]
   )
   await upsertLibraryItemsForConversation(userId, conversationId, normalizedSnapshot.generatedImages || [])
 
@@ -4322,7 +4474,7 @@ const server = createServer(async (req, res) => {
 
     if (req.method === 'GET' && url.pathname === '/api/playground/conversations') {
       const user = await getAuthenticatedUser(req)
-      const conversations = await listConversations(user.id)
+      const conversations = await listConversations(user.id, url.searchParams.get('workspace_type') || '')
       json(res, 200, { code: 0, message: 'success', data: conversations })
       return
     }
@@ -4343,7 +4495,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/playground/conversations') {
       const user = await getAuthenticatedUser(req)
       const body = await parseJsonBody(req)
-      const workspaceType = body?.workspace_type === 'ppt' ? 'ppt' : 'create'
+      const workspaceType = normalizeRequestedWorkspaceType(body?.workspace_type)
       const conversation = await createConversation(user.id, typeof body?.title === 'string' ? body.title : '', workspaceType)
       json(res, 201, { code: 0, message: 'success', data: conversation })
       return
@@ -4355,7 +4507,7 @@ const server = createServer(async (req, res) => {
       if (!conversationId) {
         throw appError(400, 'Conversation ID is required')
       }
-      const payload = await loadConversation(user.id, conversationId)
+      const payload = await loadConversation(user.id, conversationId, url.searchParams.get('workspace_type') || '')
       json(res, 200, { code: 0, message: 'success', data: payload })
       return
     }

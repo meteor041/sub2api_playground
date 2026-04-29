@@ -1,5 +1,5 @@
 export type UserRole = 'admin' | 'user'
-export type WorkspaceType = 'create' | 'ppt'
+export type WorkspaceType = 'create' | 'ppt' | 'sprite'
 
 export interface UserProfile {
   id: number
@@ -210,7 +210,65 @@ export interface ConversationPayload {
     chatMessages: ChatMessage[]
     generatedImages: GeneratedImage[]
     pptState?: PptWorkspaceState | null
+    spriteState?: SpriteWorkspaceState | null
   }
+}
+
+export interface SpriteCharacterProfile {
+  id: string
+  name: string
+  archetype: string
+  visualStyle: string
+  description: string
+  negativePrompt: string
+  palette: string
+  costume: string
+  bodyType: string
+  faceTraits: string
+  hair: string
+  accessories: string
+  proportions: string
+  referenceImageId?: string
+  referenceImageAssetToken?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SpriteActionFrame {
+  id: string
+  action: string
+  direction: string
+  frameIndex: number
+  imageId: string
+  prompt: string
+  createdAt: number
+}
+
+export interface SpriteActionGroup {
+  id: string
+  action: string
+  direction: string
+  frameCount: number
+  status: 'draft' | 'generating' | 'ready' | 'failed'
+  frames: SpriteActionFrame[]
+}
+
+export interface SpriteSheetAsset {
+  id: string
+  actionGroupId: string
+  imageAssetToken?: string
+  jsonAssetToken?: string
+  frameWidth: number
+  frameHeight: number
+  columns: number
+  rows: number
+  createdAt: number
+}
+
+export interface SpriteWorkspaceState {
+  character: SpriteCharacterProfile | null
+  actionGroups: SpriteActionGroup[]
+  sheets: SpriteSheetAsset[]
 }
 
 export interface PptSlidePlan {

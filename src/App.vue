@@ -7,6 +7,7 @@ import {
   createApiKey,
   createImageTask,
   createPptConversation,
+  createSpriteConversation,
   deleteLibraryItem,
   deleteSshKey,
   exportPptPresentation,
@@ -47,8 +48,10 @@ import type {
   PptExportRequest,
   PptSlidePlan,
   PptWorkspaceState,
+  SpriteWorkspaceState,
   SshKey,
-  UserProfile
+  UserProfile,
+  WorkspaceType
 } from './types'
 
 const ENABLE_MOCK = import.meta.env.DEV
@@ -81,6 +84,7 @@ const maxImageToolCallsPerTurn = 1
 const MAIN_SITE_REGISTER_URL = 'https://meteor041.com'
 const ACTIVE_CREATE_CONVERSATION_KEY = 'playground_active_create_conversation_id'
 const ACTIVE_PPT_CONVERSATION_KEY = 'playground_active_ppt_conversation_id'
+const ACTIVE_SPRITE_CONVERSATION_KEY = 'playground_active_sprite_conversation_id'
 const PENDING_IMAGE_TASKS_KEY = 'playground_pending_image_tasks'
 const THEME_MODE_KEY = 'playground_theme_mode'
 const PPT_DRAFT_KEY = 'playground_ppt_draft'
@@ -138,7 +142,7 @@ const imageToolInstructions = [
 ].join(' ')
 
 const isAuthenticated = ref(hasAuthToken())
-const activeView = ref<'gallery' | 'library' | 'create' | 'ppt'>('gallery')
+const activeView = ref<'gallery' | 'library' | 'create' | 'ppt' | 'sprite'>('gallery')
 const createMode = ref<'chat' | 'direct'>('chat')
 const themeMode = ref<'light' | 'dark'>('light')
 const toastAutoCloseMs = 5000
@@ -239,6 +243,7 @@ const pptEditorOpen = ref(false)
 const pptEditorToolsOpen = ref(false)
 const pptPresentOpen = ref(false)
 const pptImageGenerationConcurrency = 5
+const spriteState = ref<SpriteWorkspaceState | null>(null)
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -371,6 +376,7 @@ const currentConversation = computed(() => (
 
 const createTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'create'))
 const pptTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'ppt'))
+const spriteTaskRecords = computed(() => conversations.value.filter((conversation) => conversation.workspaceType === 'sprite'))
 
 const pptSlides = computed(() => pptPlan.value?.slides || [])
 
@@ -1747,18 +1753,66 @@ function sortConversations(items: ConversationSummary[]): ConversationSummary[] 
   })
 }
 
+function activeWorkspaceTypeForView(view: typeof activeView.value): WorkspaceType {
+  if (view === 'ppt') {
+    return 'ppt'
+  }
+  if (view === 'sprite') {
+    return 'sprite'
+  }
+  return 'create'
+}
+
+function emptySpriteWorkspaceState(): SpriteWorkspaceState {
+  return {
+    character: null,
+    actionGroups: [],
+    sheets: []
+  }
+}
+
+function applySpriteWorkspaceState(state: SpriteWorkspaceState | null): void {
+  spriteState.value = state
+    ? {
+      character: state.character || null,
+      actionGroups: Array.isArray(state.actionGroups) ? state.actionGroups : [],
+      sheets: Array.isArray(state.sheets) ? state.sheets : []
+    }
+    : emptySpriteWorkspaceState()
+}
+
+function currentSpriteWorkspaceState(): SpriteWorkspaceState | null {
+  return spriteState.value ? {
+    character: spriteState.value.character,
+    actionGroups: [...spriteState.value.actionGroups],
+    sheets: [...spriteState.value.sheets]
+  } : emptySpriteWorkspaceState()
+}
+
+function normalizePayloadWorkspaceType(workspaceType?: WorkspaceType): WorkspaceType {
+  return workspaceType === 'ppt' || workspaceType === 'sprite' ? workspaceType : 'create'
+}
+
 function isBlankConversationState(state: {
   chatMessages?: ChatMessage[]
   generatedImages?: GeneratedImage[]
   pptState?: PptWorkspaceState | null
+  spriteState?: SpriteWorkspaceState | null
 } | null | undefined): boolean {
   const chatMessages = Array.isArray(state?.chatMessages) ? state.chatMessages : []
   const generatedImages = Array.isArray(state?.generatedImages) ? state.generatedImages : []
   const pptState = state?.pptState && typeof state.pptState === 'object' ? state.pptState : null
+  const spriteState = state?.spriteState && typeof state.spriteState === 'object' ? state.spriteState : null
+  const hasSpriteContent = Boolean(
+    spriteState?.character ||
+    (Array.isArray(spriteState?.actionGroups) && spriteState.actionGroups.length > 0) ||
+    (Array.isArray(spriteState?.sheets) && spriteState.sheets.length > 0)
+  )
 
   return chatMessages.length === 0 &&
     generatedImages.length === 0 &&
-    !pptState
+    !pptState &&
+    !hasSpriteContent
 }
 
 async function findReusableBlankCreateConversation(): Promise<ConversationPayload | null> {
@@ -1772,7 +1826,8 @@ async function findReusableBlankCreateConversation(): Promise<ConversationPayloa
       state: {
         workspaceType: 'create',
         chatMessages: [],
-        generatedImages: []
+        generatedImages: [],
+        spriteState: null
       }
     }
   }
@@ -1784,7 +1839,7 @@ async function findReusableBlankCreateConversation(): Promise<ConversationPayloa
   ))
 
   for (const candidate of candidates) {
-    const payload = await getConversation(candidate.id)
+    const payload = await getConversation(candidate.id, 'create')
     if (payload.conversation.workspaceType === 'create' && isBlankConversationState(payload.state)) {
       return payload
     }
@@ -1804,20 +1859,27 @@ async function activateReusableBlankCreateConversation(payload: ConversationPayl
   )
 }
 
-function workspaceConversationStorageKey(workspaceType: 'create' | 'ppt'): string {
-  return workspaceType === 'ppt' ? ACTIVE_PPT_CONVERSATION_KEY : ACTIVE_CREATE_CONVERSATION_KEY
+function workspaceConversationStorageKey(workspaceType: WorkspaceType): string {
+  if (workspaceType === 'ppt') {
+    return ACTIVE_PPT_CONVERSATION_KEY
+  }
+  if (workspaceType === 'sprite') {
+    return ACTIVE_SPRITE_CONVERSATION_KEY
+  }
+  return ACTIVE_CREATE_CONVERSATION_KEY
 }
 
-function readActiveConversationId(workspaceType: 'create' | 'ppt'): string {
+function readActiveConversationId(workspaceType: WorkspaceType): string {
   return localStorage.getItem(workspaceConversationStorageKey(workspaceType)) || ''
 }
 
 function clearActiveConversationIds(): void {
   localStorage.removeItem(ACTIVE_CREATE_CONVERSATION_KEY)
   localStorage.removeItem(ACTIVE_PPT_CONVERSATION_KEY)
+  localStorage.removeItem(ACTIVE_SPRITE_CONVERSATION_KEY)
 }
 
-function persistActiveConversationId(conversationId: string, workspaceType: 'create' | 'ppt'): void {
+function persistActiveConversationId(conversationId: string, workspaceType: WorkspaceType): void {
   currentConversationId.value = conversationId
   const storageKey = workspaceConversationStorageKey(workspaceType)
   if (conversationId) {
@@ -1831,6 +1893,7 @@ function clearLoadedConversationState(): void {
   chatMessages.value = []
   generatedImages.value = []
   applyPptWorkspaceState(null)
+  applySpriteWorkspaceState(null)
   selectedImageKey.value = ''
   sharedImageKeys.value = []
 }
@@ -1842,6 +1905,7 @@ function resetConversationState(): void {
   chatMessages.value = []
   generatedImages.value = []
   applyPptWorkspaceState(null)
+  applySpriteWorkspaceState(null)
   selectedImageKey.value = ''
   sharedImageKeys.value = []
   localStorage.removeItem(PENDING_IMAGE_TASKS_KEY)
@@ -1883,7 +1947,7 @@ function readPendingImageTasks(): PendingImageTask[] {
 }
 
 function preferredPendingConversationId(
-  workspaceType: 'create' | 'ppt',
+  workspaceType: WorkspaceType,
   records: ConversationSummary[]
 ): string {
   const recordIds = new Set(records.map((record) => record.id))
@@ -1955,17 +2019,23 @@ async function saveConversationSnapshot(
   nextPptState: PptWorkspaceState | null = currentConversationId.value === conversationId
     ? currentPptWorkspaceState()
     : null,
-  workspaceType: 'create' | 'ppt' = conversationId === currentConversationId.value
-    ? (currentConversation.value?.workspaceType || (activeView.value === 'ppt' ? 'ppt' : 'create'))
-    : 'create'
+  workspaceType: WorkspaceType = conversationId === currentConversationId.value
+    ? (currentConversation.value?.workspaceType || activeWorkspaceTypeForView(activeView.value))
+    : 'create',
+  nextSpriteState: SpriteWorkspaceState | null = currentConversationId.value === conversationId
+    ? currentSpriteWorkspaceState()
+    : null
 ): Promise<void> {
-  const repairedImages = repairGeneratedImagesFromPptPlan(nextPptState?.plan || null, nextGeneratedImages)
+  const effectivePptState = workspaceType === 'ppt' ? nextPptState : null
+  const effectiveSpriteState = workspaceType === 'sprite' ? nextSpriteState : null
+  const repairedImages = repairGeneratedImagesFromPptPlan(effectivePptState?.plan || null, nextGeneratedImages)
   const persistedImages = normalizeGeneratedImages(repairedImages)
   const result = await saveConversationState(conversationId, {
     workspaceType,
     chatMessages: nextChatMessages,
     generatedImages: persistedImages,
-    pptState: nextPptState
+    pptState: effectivePptState,
+    spriteState: effectiveSpriteState
   })
   conversations.value = sortConversations(conversations.value.map((conversation) => (
     conversation.id === conversationId
@@ -1981,39 +2051,41 @@ async function saveConversationSnapshot(
   if (currentConversationId.value === conversationId) {
     chatMessages.value = nextChatMessages
     generatedImages.value = persistedImages
-    applyPptWorkspaceState(nextPptState)
+    applyPptWorkspaceState(effectivePptState)
+    applySpriteWorkspaceState(effectiveSpriteState)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
   }
 }
 
-async function refreshConversationIndex(): Promise<void> {
-  conversations.value = sortConversations(await listConversations())
+async function refreshConversationIndex(workspaceType: WorkspaceType = activeWorkspaceTypeForView(activeView.value)): Promise<void> {
+  conversations.value = sortConversations(await listConversations(workspaceType))
 }
 
-async function loadConversationById(conversationId: string): Promise<void> {
+async function loadConversationById(conversationId: string, workspaceType: WorkspaceType = activeWorkspaceTypeForView(activeView.value)): Promise<void> {
   const requestId = ++conversationLoadRequestId
   conversationBusy.value = true
   try {
-    const payload = await getConversation(conversationId)
+    const payload = await getConversation(conversationId, workspaceType)
     if (requestId !== conversationLoadRequestId) {
       return
     }
-    const workspaceType = payload.conversation.workspaceType === 'ppt' ? 'ppt' : 'create'
+    const resolvedWorkspaceType = payload.conversation.workspaceType || workspaceType
     conversations.value = sortConversations(conversations.value.map((conversation) => (
       conversation.id === payload.conversation.id
         ? {
           ...conversation,
           ...payload.conversation,
-          workspaceType
+          workspaceType: resolvedWorkspaceType
         }
         : conversation
     )))
-    persistActiveConversationId(payload.conversation.id, workspaceType)
+    persistActiveConversationId(payload.conversation.id, resolvedWorkspaceType)
     chatMessages.value = payload.state.chatMessages || []
     const repairedImages = repairGeneratedImagesFromPptPlan(payload.state.pptState?.plan || null, payload.state.generatedImages || [])
     generatedImages.value = normalizeGeneratedImages(repairedImages)
     applyPptWorkspaceState(payload.state.pptState || null)
+    applySpriteWorkspaceState(payload.state.spriteState || null)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
     restorePendingLoadingImages(payload.conversation.id)
@@ -2040,6 +2112,7 @@ async function startNewConversation(): Promise<void> {
     chatMessages.value = []
     generatedImages.value = []
     applyPptWorkspaceState(null)
+    applySpriteWorkspaceState(null)
     selectedImageKey.value = ''
     sharedImageKeys.value = []
   } finally {
@@ -2056,6 +2129,7 @@ async function startNewPptTask(): Promise<void> {
     chatMessages.value = []
     generatedImages.value = []
     applyPptWorkspaceState(null)
+    applySpriteWorkspaceState(null)
     pptSlideEditPrompt.value = ''
     pptEditorOpen.value = false
     pptConfigPanelOpen.value = true
@@ -2065,6 +2139,27 @@ async function startNewPptTask(): Promise<void> {
     setSuccess('已创建新的 PPT 任务。')
   } catch (error) {
     setError(error instanceof Error ? error.message : '创建 PPT 任务失败')
+  } finally {
+    conversationBusy.value = false
+  }
+}
+
+async function startNewSpriteTask(): Promise<void> {
+  conversationBusy.value = true
+  try {
+    const created = await createSpriteConversation('新角色资产任务')
+    conversations.value = sortConversations([created, ...conversations.value.filter((item) => item.id !== created.id)])
+    persistActiveConversationId(created.id, 'sprite')
+    chatMessages.value = []
+    generatedImages.value = []
+    applyPptWorkspaceState(null)
+    applySpriteWorkspaceState(null)
+    selectedImageKey.value = ''
+    sharedImageKeys.value = []
+    activeView.value = 'sprite'
+    setSuccess('已创建新的角色资产任务。')
+  } catch (error) {
+    setError(error instanceof Error ? error.message : '创建角色资产任务失败')
   } finally {
     conversationBusy.value = false
   }
@@ -2080,10 +2175,21 @@ async function handlePptTaskSelect(conversationId: string): Promise<void> {
   await handleConversationSelect()
 }
 
-async function ensureConversationLoaded(workspaceType: 'create' | 'ppt' = 'create'): Promise<void> {
-  await refreshConversationIndex()
+async function handleSpriteTaskSelect(conversationId: string): Promise<void> {
+  if (!conversationId) {
+    return
+  }
+  persistActiveConversationId(conversationId, 'sprite')
+  activeView.value = 'sprite'
+  await handleConversationSelect()
+}
 
-  const records = workspaceType === 'ppt' ? pptTaskRecords.value : createTaskRecords.value
+async function ensureConversationLoaded(workspaceType: WorkspaceType = 'create'): Promise<void> {
+  await refreshConversationIndex(workspaceType)
+
+  const records = workspaceType === 'ppt'
+    ? pptTaskRecords.value
+    : (workspaceType === 'sprite' ? spriteTaskRecords.value : createTaskRecords.value)
   const pendingConversationId = preferredPendingConversationId(workspaceType, records)
   const savedConversationId = readActiveConversationId(workspaceType)
   const preferredConversation = records.find((item) => item.id === pendingConversationId) ||
@@ -2094,13 +2200,15 @@ async function ensureConversationLoaded(workspaceType: 'create' | 'ppt' = 'creat
   if (!preferredConversation) {
     if (workspaceType === 'ppt') {
       await startNewPptTask()
+    } else if (workspaceType === 'sprite') {
+      await startNewSpriteTask()
     } else {
       await startNewConversation()
     }
     return
   }
 
-  await loadConversationById(preferredConversation.id)
+  await loadConversationById(preferredConversation.id, workspaceType)
 }
 
 async function persistConversationSnapshot(): Promise<void> {
@@ -2122,7 +2230,7 @@ async function handleConversationSelect(): Promise<void> {
   if (!currentConversationId.value) {
     return
   }
-  await loadConversationById(currentConversationId.value)
+  await loadConversationById(currentConversationId.value, currentConversation.value?.workspaceType || activeWorkspaceTypeForView(activeView.value))
 }
 
 async function handleCreateConversationSelect(conversationId: string): Promise<void> {
@@ -2179,7 +2287,7 @@ async function handleLogin(): Promise<void> {
     isAuthenticated.value = true
     setSuccess('登录成功，正在加载 Playground。')
     await refreshWorkspace()
-    await ensureConversationLoaded(activeView.value === 'ppt' ? 'ppt' : 'create')
+    await ensureConversationLoaded(activeWorkspaceTypeForView(activeView.value))
   } catch (error) {
     setError(error instanceof Error ? error.message : '登录失败')
   } finally {
@@ -2676,7 +2784,10 @@ async function handleShareImage(image: GeneratedImage, index = 0): Promise<void>
   sharingImageKeys.value = [...sharingImageKeys.value, shareKey]
   try {
     await persistConversationSnapshot()
-    const persisted = await getConversation(currentConversationId.value)
+    const persisted = await getConversation(
+      currentConversationId.value,
+      currentConversation.value?.workspaceType || activeWorkspaceTypeForView(activeView.value)
+    )
     const persistedImages = normalizeGeneratedImages(persisted.state.generatedImages || [])
     const shareImage = persistedImages.find((item, itemIndex) => imageShareKey(item, itemIndex) === shareKey) ||
       persistedImages[index] ||
@@ -3249,7 +3360,7 @@ async function handleSendChat(): Promise<void> {
       if (currentConversationId.value === originConversationId) {
         await persistConversationSnapshot()
       } else {
-        const payload = await getConversation(originConversationId)
+        const payload = await getConversation(originConversationId, 'create')
         await saveConversationSnapshot(
           originConversationId,
           replaceOrAppendMessage(payload.state.chatMessages || [], {
@@ -3258,7 +3369,8 @@ async function handleSendChat(): Promise<void> {
           }),
           normalizeGeneratedImages(payload.state.generatedImages || []),
           payload.state.pptState || null,
-          payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
+          normalizePayloadWorkspaceType(payload.state.workspaceType),
+          payload.state.spriteState || null
         )
       }
       return
@@ -3405,7 +3517,7 @@ function extractGeneratedImagesFromTask(task: ImageTaskStatus): GeneratedImage[]
 }
 
 async function archivePendingImageFailure(pendingTask: PendingImageTask, message: string): Promise<void> {
-  const payload = await getConversation(pendingTask.conversationId)
+  const payload = await getConversation(pendingTask.conversationId, 'create')
   let nextMessages = payload.state.chatMessages || []
   const nextImages = normalizeGeneratedImages(
     (payload.state.generatedImages || []).filter((image) => !String(image?.id || '').startsWith(taskImageIdPrefix(pendingTask.taskId)))
@@ -3422,7 +3534,8 @@ async function archivePendingImageFailure(pendingTask: PendingImageTask, message
     nextMessages,
     nextImages,
     payload.state.pptState || null,
-    payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
+    normalizePayloadWorkspaceType(payload.state.workspaceType),
+    payload.state.spriteState || null
   )
 }
 
@@ -3431,7 +3544,7 @@ async function archiveAssistantFailure(
   assistantMessageId: string,
   message: string
 ): Promise<void> {
-  const payload = await getConversation(conversationId)
+  const payload = await getConversation(conversationId, 'create')
   const nextMessages = replaceOrAppendMessage(payload.state.chatMessages || [], {
     id: assistantMessageId,
     role: 'assistant',
@@ -3443,7 +3556,8 @@ async function archiveAssistantFailure(
     nextMessages,
     normalizeGeneratedImages(payload.state.generatedImages || []),
     payload.state.pptState || null,
-    payload.state.workspaceType === 'ppt' ? 'ppt' : 'create'
+    normalizePayloadWorkspaceType(payload.state.workspaceType),
+    payload.state.spriteState || null
   )
 }
 
@@ -4534,8 +4648,8 @@ watch(activeView, async (view) => {
     return
   }
   if (view !== 'gallery') {
-    if (isAuthenticated.value && (view === 'create' || view === 'ppt')) {
-      const workspaceType = view === 'ppt' ? 'ppt' : 'create'
+    if (isAuthenticated.value && (view === 'create' || view === 'ppt' || view === 'sprite')) {
+      const workspaceType = activeWorkspaceTypeForView(view)
       const currentWorkspaceType = currentConversation.value?.workspaceType
       if (!currentConversationId.value || currentWorkspaceType !== workspaceType) {
         conversationLoadRequestId += 1
@@ -4621,7 +4735,7 @@ onMounted(async () => {
   setupGalleryObserver()
   if (isAuthenticated.value) {
     await refreshWorkspace()
-    await ensureConversationLoaded(activeView.value === 'ppt' ? 'ppt' : 'create')
+    await ensureConversationLoaded(activeWorkspaceTypeForView(activeView.value))
     resumePendingImageTasks()
   }
 })
@@ -4722,6 +4836,16 @@ onBeforeUnmount(() => {
           <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
             <span>PPT</span>
             <small>Slide planner</small>
+          </div>
+        </button>
+        <button :class="{ active: activeView === 'sprite' }" type="button" title="角色资产" @click="activeView = 'sprite'">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="8" r="4"/>
+            <path d="M5 20a7 7 0 0 1 14 0" />
+          </svg>
+          <div v-if="!mainSidebarCollapsed" class="side-nav-copy">
+            <span>角色资产</span>
+            <small>Sprite workspace</small>
           </div>
         </button>
       </nav>
@@ -5062,6 +5186,86 @@ onBeforeUnmount(() => {
           <span v-else-if="!libraryHasMore && libraryItems.length > 0">已经到底了</span>
         </div>
       </template>
+    </section>
+
+    <section v-else-if="activeView === 'sprite'" class="page create-page sprite-page">
+      <template v-if="!isAuthenticated">
+        <section class="login-card panel">
+          <div>
+            <p class="eyebrow">Sprite</p>
+            <h1>登录后开始制作角色资产</h1>
+            <p>角色资产工作区会与创造区、PPT 独立保存。先锁定角色设定，再批量生成动作与导出 sprite sheet。</p>
+            <div class="login-card-actions">
+              <a class="login-register-link" :href="MAIN_SITE_REGISTER_URL" target="_blank" rel="noreferrer">
+                去主站注册
+              </a>
+            </div>
+          </div>
+          <form class="login-form" @submit.prevent="handleLogin">
+            <label>
+              邮箱
+              <input v-model="email" type="email" autocomplete="email" placeholder="you@example.com" />
+            </label>
+            <label>
+              密码
+              <input v-model="password" type="password" autocomplete="current-password" placeholder="请输入密码" />
+            </label>
+            <button :disabled="loginBusy" type="submit">
+              {{ loginBusy ? '登录中...' : '进入角色资产页' }}
+            </button>
+          </form>
+        </section>
+      </template>
+
+      <div v-else class="creator-layout sprite-layout">
+        <section class="creator-canvas">
+          <div class="panel" style="height:100%;display:flex;flex-direction:column;gap:18px;padding:24px">
+            <div>
+              <p class="eyebrow">Sprite Workspace</p>
+              <h1 style="margin:0">角色资产制作</h1>
+              <p style="margin:8px 0 0;color:var(--muted-text, #64748b)">该工作区的会话与创造区、PPT 完全隔离。当前先接入独立会话骨架，后续在这里补角色定稿、参考图锁定、动作帧与 sheet 导出。</p>
+            </div>
+            <div class="panel" style="padding:18px">
+              <strong>{{ currentConversation?.title || '未选择任务' }}</strong>
+              <p style="margin:8px 0 0;color:var(--muted-text, #64748b)">
+                {{
+                  spriteState?.character?.name
+                    ? `当前角色：${spriteState.character.name}`
+                    : '当前还没有角色设定。'
+                }}
+              </p>
+            </div>
+            <div class="panel" style="padding:18px">
+              <strong>下一步</strong>
+              <p style="margin:8px 0 0;color:var(--muted-text, #64748b)">接下来会在这里实现角色设定、参考图锁定、动作分组生成与 sprite sheet 导出。</p>
+            </div>
+          </div>
+        </section>
+
+        <aside class="work-sidebar panel">
+          <div class="work-tab-header">
+            <span class="eyebrow">Sprite Sessions</span>
+            <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
+              新建任务
+            </button>
+          </div>
+          <div class="sessions-list work-scroll">
+            <button
+              v-for="conversation in spriteTaskRecords"
+              :key="conversation.id"
+              class="session-button"
+              :class="{ active: conversation.id === currentConversationId }"
+              type="button"
+              :disabled="conversationBusy"
+              @click="handleSpriteTaskSelect(conversation.id)"
+            >
+              <strong>{{ conversation.title }}</strong>
+              <span>{{ conversation.updatedAt }}</span>
+            </button>
+            <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
+          </div>
+        </aside>
+      </div>
     </section>
 
     <section v-else-if="activeView === 'ppt'" class="page ppt-page">

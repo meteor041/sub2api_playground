@@ -15,7 +15,8 @@ import type {
   PaginatedResponse,
   ShareGalleryResponse,
   SshKey,
-  UserProfile
+  UserProfile,
+  WorkspaceType
 } from './types'
 
 const baseUrl = (import.meta.env.VITE_SUB2API_BASE_URL || '').replace(/\/$/, '')
@@ -566,31 +567,44 @@ export function batchUpdateLibraryItems(payload: {
   })
 }
 
-export function listConversations(): Promise<ConversationSummary[]> {
-  return request<ConversationSummary[]>('/api/playground/conversations')
+export function listConversations(workspaceType?: WorkspaceType): Promise<ConversationSummary[]> {
+  const searchParams = new URLSearchParams()
+  if (workspaceType) {
+    searchParams.set('workspace_type', workspaceType)
+  }
+  const query = searchParams.toString()
+  return request<ConversationSummary[]>(`/api/playground/conversations${query ? `?${query}` : ''}`)
 }
 
-export function createConversation(title = ''): Promise<ConversationSummary> {
+export function createConversation(title = '', workspaceType: WorkspaceType = 'create'): Promise<ConversationSummary> {
   return request<ConversationSummary>('/api/playground/conversations', {
     method: 'POST',
-    body: JSON.stringify({ title, workspace_type: 'create' })
+    body: JSON.stringify({ title, workspace_type: workspaceType })
   })
 }
 
 export function createPptConversation(title = ''): Promise<ConversationSummary> {
-  return request<ConversationSummary>('/api/playground/conversations', {
-    method: 'POST',
-    body: JSON.stringify({ title, workspace_type: 'ppt' })
-  })
+  return createConversation(title, 'ppt')
 }
 
-export function getConversation(conversationId: string): Promise<ConversationPayload> {
-  return request<ConversationPayload>(`/api/playground/conversations/${encodeURIComponent(conversationId)}`)
+export function createSpriteConversation(title = ''): Promise<ConversationSummary> {
+  return createConversation(title, 'sprite')
+}
+
+export function getConversation(conversationId: string, workspaceType?: WorkspaceType): Promise<ConversationPayload> {
+  const searchParams = new URLSearchParams()
+  if (workspaceType) {
+    searchParams.set('workspace_type', workspaceType)
+  }
+  const query = searchParams.toString()
+  return request<ConversationPayload>(
+    `/api/playground/conversations/${encodeURIComponent(conversationId)}${query ? `?${query}` : ''}`
+  )
 }
 
 export function saveConversationState(
   conversationId: string,
-  payload: { workspaceType?: unknown; chatMessages: unknown[]; generatedImages: unknown[]; pptState?: unknown }
+  payload: { workspaceType?: unknown; chatMessages: unknown[]; generatedImages: unknown[]; pptState?: unknown; spriteState?: unknown }
 ): Promise<{ savedAt: string; title: string }> {
   return request<{ savedAt: string; title: string }>(
     `/api/playground/conversations/${encodeURIComponent(conversationId)}`,
