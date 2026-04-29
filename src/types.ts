@@ -35,6 +35,18 @@ export interface ApiKey {
   group?: Group
 }
 
+export interface SshKey {
+  id: string
+  name: string
+  fingerprint: string
+  key_type: string
+  api_key_id: number | null
+  api_key_name: string
+  created_at: string
+  updated_at: string
+  last_used_at: string | null
+}
+
 export interface PaginatedResponse<T> {
   items: T[]
   total: number

@@ -88,6 +88,15 @@ VITE_PLAYGROUND_SERVER_TARGET=http://127.0.0.1:8081 npm run dev
 3. 轮询任务状态
 4. 完成后再读取图片 URL 或 data URL
 
+## AI Skill 与 SSH 认证
+
+仓库内置了可安装的 AI Skill：`skills/sub2api-image`。其中包含两个脚本：
+
+- `scripts/create_image_task.py` 会用本机 SSH 私钥登录 Playground，创建异步生图或图片编辑任务，并立刻返回 `task_id`。
+- `scripts/download_image_task.py` 会再次用 SSH 登录，通过 `task_id` 查询任务状态，并把已完成图片下载到本地路径。
+
+在 WebUI 的创造工作区打开 SSH 标签页，粘贴 SSH 公钥，并绑定当前选中的 OpenAI API Key。脚本登录时服务端会用 `ssh-keygen -Y verify` 校验签名，所以 Docker 运行镜像会安装 `openssh-client`。SSH 绑定会保存所选 API Key 供后台生图使用，请保护好 PostgreSQL 数据库。
+
 ## 持久化模型
 
 - 会话元数据写入本地 PostgreSQL

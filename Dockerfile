@@ -16,6 +16,7 @@ FROM node:20-alpine
 WORKDIR /app
 ENV SUB2API_UPSTREAM=http://sub2api:8080
 ENV PLAYGROUND_ENABLE_CF_IMAGE_RESIZING=false
+RUN apk add --no-cache openssh-client
 COPY package*.json ./
 RUN npm ci --omit=dev
 COPY --from=build /app/dist ./dist
