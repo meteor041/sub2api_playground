@@ -3871,30 +3871,32 @@ h2 {
 }
 
 .sprite-editor-tabs {
-  display: flex;
-  gap: 8px;
-  padding: 14px 14px 0;
-  border-bottom: 1px solid var(--line);
+  margin: 14px 14px 0;
+  width: fit-content;
+  border-bottom: 0;
 }
 
 .sprite-editor-tab {
-  padding: 0.72rem 1rem;
-  border-radius: 14px 14px 0 0;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5rem 0.85rem;
+  border-radius: 10px;
   color: var(--muted);
   background: transparent;
   box-shadow: none;
+  font-size: 0.9rem;
 }
 
 .sprite-editor-tab:hover:not(:disabled) {
   transform: none;
   box-shadow: none;
   color: var(--ink);
-  background: var(--secondary-bg);
 }
 
 .sprite-editor-tab.active {
-  color: var(--accent);
-  background: var(--accent-soft);
+  color: var(--ink-contrast);
+  background: var(--ink);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
 }
 
 .sprite-section-header {
@@ -4176,9 +4178,10 @@ h2 {
 }
 
 .sprite-preview-tab.active {
-  color: var(--accent);
-  background: var(--accent-soft);
-  outline-color: var(--accent);
+  color: var(--ink-contrast);
+  background: var(--ink);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.18);
+  outline-color: transparent;
 }
 
 .sprite-preview-tab:disabled {
@@ -4187,6 +4190,10 @@ h2 {
 
 .sprite-preview-tab-action {
   min-width: 52px;
+}
+
+.sprite-preview-tabs {
+  width: fit-content;
 }
 
 .sprite-preview-frame-strip {

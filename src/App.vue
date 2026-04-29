@@ -6138,7 +6138,7 @@ onBeforeUnmount(() => {
               @change="handleSpriteReferenceUpload"
             />
             <section class="sprite-preview-stage">
-              <div class="sprite-preview-tabs">
+              <div class="mode-tabs sprite-preview-tabs">
                 <button
                   class="sprite-preview-tab"
                   :class="{ active: spritePreviewTab === 'character' }"
@@ -6262,7 +6262,7 @@ onBeforeUnmount(() => {
         <section class="sprite-edit-column">
           <div class="sprite-workspace">
             <div class="panel sprite-editor-shell">
-              <div class="sprite-editor-tabs" role="tablist" aria-label="角色编辑分页">
+              <div class="mode-tabs sprite-editor-tabs" role="tablist" aria-label="角色编辑分页">
                 <button
                   class="sprite-editor-tab"
                   :class="{ active: spriteEditorTab === 'design' }"
