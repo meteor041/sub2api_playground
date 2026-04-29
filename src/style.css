@@ -3952,8 +3952,8 @@ h2 {
 }
 
 .sprite-generate-primary {
-  min-width: 220px;
-  padding: 1rem 1.45rem;
+  min-width: 112px;
+  padding: 0.92rem 1rem;
   font-size: 1rem;
   font-weight: 800;
   letter-spacing: 0.01em;
