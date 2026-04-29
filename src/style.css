@@ -3907,6 +3907,11 @@ h2 {
   margin-bottom: 18px;
 }
 
+.sprite-section-header-compact {
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
 .sprite-inline-actions {
   display: flex;
   flex-wrap: wrap;
@@ -4110,12 +4115,13 @@ h2 {
   grid-row: 1;
   align-content: start;
   gap: 14px;
+  padding-top: 14px;
 }
 
 .sprite-preview-stage {
   display: grid;
-  gap: 12px;
-  padding-top: 2px;
+  gap: 10px;
+  padding-top: 0;
 }
 
 .sprite-preview-canvas {

@@ -6116,8 +6116,7 @@ onBeforeUnmount(() => {
       <div v-else class="sprite-studio-layout">
         <aside class="sprite-preview-column">
           <section class="panel sprite-card sprite-preview-card">
-            <div class="sprite-section-header">
-              <div></div>
+            <div class="sprite-section-header sprite-section-header-compact">
               <div class="sprite-inline-actions">
                 <button
                   v-if="spriteReferenceImage"
