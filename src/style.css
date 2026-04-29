@@ -3959,36 +3959,114 @@ h2 {
 .sprite-preview-card {
   display: grid;
   align-content: start;
+  gap: 14px;
 }
 
-.sprite-reference-card {
+.sprite-preview-stage,
+.sprite-preview-actions,
+.sprite-preview-prompt {
   display: grid;
-  grid-template-columns: 1fr;
   gap: 12px;
-  margin-bottom: 16px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--panel-soft-bg);
+  padding-top: 2px;
 }
 
-.sprite-reference-card img {
+.sprite-preview-stage h3,
+.sprite-preview-actions h3,
+.sprite-preview-prompt summary {
+  margin: 0;
+  font-size: 0.96rem;
+}
+
+.sprite-preview-canvas {
+  display: grid;
+  place-items: center;
+  min-height: 320px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0.92)),
+    repeating-linear-gradient(
+      45deg,
+      rgba(15, 23, 42, 0.03),
+      rgba(15, 23, 42, 0.03) 10px,
+      transparent 10px,
+      transparent 20px
+    );
+}
+
+.sprite-preview-canvas.empty {
+  color: var(--muted);
+}
+
+.sprite-preview-canvas img {
   width: 100%;
-  aspect-ratio: 4 / 5;
+  max-height: 460px;
   object-fit: contain;
   border-radius: 16px;
   cursor: zoom-in;
-  background: rgba(255, 255, 255, 0.65);
 }
 
-.sprite-reference-copy {
-  display: grid;
-  gap: 6px;
+.sprite-preview-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 
-.sprite-reference-copy span,
-.sprite-reference-copy p {
+.sprite-preview-status span {
   color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sprite-preview-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sprite-preview-tab,
+.sprite-preview-frame-box {
+  min-width: 42px;
+  padding: 0.5rem 0.78rem;
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--ghost-bg);
+  box-shadow: none;
+  outline: 1px solid var(--line);
+}
+
+.sprite-preview-tab.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline-color: var(--accent);
+}
+
+.sprite-preview-frame-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 36px;
+}
+
+.sprite-preview-prompt {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.sprite-preview-prompt summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.sprite-preview-prompt summary::-webkit-details-marker {
+  display: none;
+}
+
+.sprite-preview-prompt p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
 }
 
 .sprite-reference-gallery {

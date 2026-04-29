@@ -291,6 +291,7 @@ const spriteFrameCount = ref(4)
 const spriteWorkspaceBusy = ref(false)
 const spriteConceptSize = ref('1024x1536')
 const spriteReferenceInput = ref<HTMLInputElement | null>(null)
+const spritePreviewActionGroupId = ref('')
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -450,6 +451,34 @@ const canGenerateSpriteConcept = computed(() => (
   Boolean(spriteCharacterForm.value.name.trim() || spriteCharacterForm.value.description.trim()) &&
   !imageBusy.value
 ))
+const spritePreviewActionGroups = computed(() => spriteState.value?.actionGroups || [])
+const currentSpritePreviewActionGroup = computed(() => {
+  const groups = spritePreviewActionGroups.value
+  if (groups.length === 0) {
+    return null
+  }
+  return groups.find((group) => group.id === spritePreviewActionGroupId.value) || groups[0] || null
+})
+const currentSpritePreviewImage = computed(() => {
+  const group = currentSpritePreviewActionGroup.value
+  const latestFrame = group?.frames?.[group.frames.length - 1]
+  if (latestFrame) {
+    return generatedImages.value.find((image) => image.id === latestFrame.imageId) || spriteReferenceImage.value || null
+  }
+  return spriteReferenceImage.value || latestGeneratedImage.value || null
+})
+const currentSpritePreviewPrompt = computed(() => (
+  currentSpritePreviewImage.value?.prompt || spriteState.value?.character?.description || ''
+))
+const spritePreviewStatusLabel = computed(() => {
+  if (imageBusy.value) {
+    return imageTaskLabel.value || 'Loading'
+  }
+  if (currentSpritePreviewImage.value) {
+    return '已生成'
+  }
+  return '等待生成'
+})
 
 const pptSlides = computed(() => pptPlan.value?.slides || [])
 
@@ -5378,6 +5407,15 @@ async function handleMoveCurrentPptSlide(direction: -1 | 1): Promise<void> {
 }
 
 watch(() => generatedImages.value.length, () => { canvasImageIndex.value = -1 })
+watch(() => spritePreviewActionGroups.value.map((group) => group.id), (groupIds) => {
+  if (groupIds.length === 0) {
+    spritePreviewActionGroupId.value = ''
+    return
+  }
+  if (!groupIds.includes(spritePreviewActionGroupId.value)) {
+    spritePreviewActionGroupId.value = groupIds[0]
+  }
+}, { immediate: true })
 watch(() => pptSlides.value.length, (length) => {
   if (length <= 0) {
     pptCurrentSlideIndex.value = 0
@@ -6218,22 +6256,58 @@ onBeforeUnmount(() => {
               accept="image/*"
               @change="handleSpriteReferenceUpload"
             />
-            <div v-if="spriteReferenceImage" class="sprite-reference-card">
-              <img
-                :src="imagePreviewUrl(spriteReferenceImage, galleryPreviewWidth)"
-                :alt="spriteReferenceImage.prompt"
-                loading="lazy"
-                @error="handleGeneratedImageError($event, spriteReferenceImage)"
-                @click="openSpriteReferencePreview"
-              />
-              <div class="sprite-reference-copy">
-                <strong>{{ spriteState?.character?.name || '已锁定参考图' }}</strong>
-                <span>{{ spriteReferenceImage.size }}</span>
-                <p>{{ spriteReferenceImage.prompt }}</p>
+            <section class="sprite-preview-stage">
+              <h3>预览</h3>
+              <div class="sprite-preview-canvas" :class="{ empty: !currentSpritePreviewImage }">
+                <img
+                  v-if="currentSpritePreviewImage"
+                  :src="imagePreviewUrl(currentSpritePreviewImage, modalPreviewWidth)"
+                  :alt="currentSpritePreviewImage.prompt"
+                  loading="lazy"
+                  @error="handleGeneratedImageError($event, currentSpritePreviewImage)"
+                  @click="currentSpritePreviewImage.id ? openSpriteFramePreview(currentSpritePreviewImage.id) : undefined"
+                />
+                <span v-else>当前还没有可预览的角色大图</span>
               </div>
-            </div>
-            <p v-else class="empty">当前还没有锁定参考图。后续生成角色设定图后，可以在这里选定一张作为统一参考。</p>
-            <p v-if="generatedImages.length === 0" class="empty">当前 sprite 会话还没有生成图片。先在编辑区点击“生成角色设定图”。</p>
+              <div class="sprite-preview-status">
+                <strong>{{ spriteState?.character?.name || '角色预览' }}</strong>
+                <span>{{ spritePreviewStatusLabel }}</span>
+              </div>
+            </section>
+
+            <section class="sprite-preview-actions">
+              <h3>动作预览</h3>
+              <div class="sprite-preview-tabs">
+                <button
+                  v-for="group in spritePreviewActionGroups"
+                  :key="group.id"
+                  class="sprite-preview-tab"
+                  :class="{ active: currentSpritePreviewActionGroup?.id === group.id }"
+                  type="button"
+                  @click="spritePreviewActionGroupId = group.id"
+                >
+                  {{ group.action }}
+                </button>
+              </div>
+              <div class="sprite-preview-frame-strip">
+                <button
+                  v-for="frame in currentSpritePreviewActionGroup?.frames || []"
+                  :key="frame.id"
+                  class="sprite-preview-frame-box"
+                  type="button"
+                  @click="openSpriteFramePreview(frame.imageId)"
+                >
+                  {{ frame.frameIndex + 1 }}
+                </button>
+                <span v-if="(currentSpritePreviewActionGroup?.frames || []).length === 0" class="empty">帧条：暂无帧</span>
+              </div>
+            </section>
+
+            <details class="sprite-preview-prompt">
+              <summary>Prompt</summary>
+              <p>{{ currentSpritePreviewPrompt || '当前还没有可展示的 prompt。' }}</p>
+            </details>
+
             <div class="sprite-reference-gallery">
               <button
                 v-for="(image, index) in generatedImages"
