@@ -6039,6 +6039,9 @@ onBeforeUnmount(() => {
                   <h2>角色基础</h2>
                 </div>
                 <div class="sprite-inline-actions">
+                  <div class="sprite-inline-select">
+                    <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
+                  </div>
                   <button class="primary sprite-generate-primary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
                     {{ imageBusy ? (imageTaskLabel || '处理中...') : '生成角色设定图' }}
                   </button>
@@ -6193,10 +6196,6 @@ onBeforeUnmount(() => {
                 </div>
               </div>
               <div class="sprite-detail-grid">
-                <label>
-                  设定图尺寸
-                  <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
-                </label>
                 <div class="sprite-advanced-hint">
                   <span>{{ selectedKeySecret ? '将使用当前已选 API Key 在 sprite 会话中生成参考图。' : '请先选择可用的 OpenAI API Key。' }}</span>
                 </div>
