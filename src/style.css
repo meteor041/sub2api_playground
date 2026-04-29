@@ -3811,29 +3811,68 @@ h2 {
 
 .sprite-studio-layout {
   display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) 360px;
+  grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
   flex: 1;
   min-height: 0;
   overflow: hidden;
 }
 
-.sprite-nav-column,
 .sprite-edit-column,
 .sprite-preview-column {
   min-width: 0;
   min-height: 0;
 }
 
-.sprite-nav-column {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 10px;
-}
-
 .sprite-edit-column,
 .sprite-preview-column {
   overflow: auto;
+}
+
+.sprite-preview-column {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.sprite-recent-projects {
+  padding: 0;
+  overflow: hidden;
+}
+
+.sprite-recent-projects summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  list-style: none;
+  cursor: pointer;
+}
+
+.sprite-recent-projects summary::-webkit-details-marker {
+  display: none;
+}
+
+.sprite-recent-projects summary svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform 160ms ease;
+}
+
+.sprite-recent-projects[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.sprite-recent-projects-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
 }
 
 .sprite-card {
@@ -4053,11 +4092,7 @@ h2 {
 
 @media (max-width: 1100px) {
   .sprite-studio-layout {
-    grid-template-columns: 180px minmax(0, 1fr);
-  }
-
-  .sprite-preview-column {
-    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, 1fr) 320px;
   }
 
   .sprite-reference-card {

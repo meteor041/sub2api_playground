@@ -5981,30 +5981,6 @@ onBeforeUnmount(() => {
       </template>
 
       <div v-else class="sprite-studio-layout">
-        <aside class="panel sprite-nav-column">
-          <div class="work-tab-header">
-            <span class="eyebrow">Sprite Sessions</span>
-            <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
-              新建任务
-            </button>
-          </div>
-          <div class="sessions-list work-scroll">
-            <button
-              v-for="conversation in spriteTaskRecords"
-              :key="conversation.id"
-              class="session-button"
-              :class="{ active: conversation.id === currentConversationId }"
-              type="button"
-              :disabled="conversationBusy"
-              @click="handleSpriteTaskSelect(conversation.id)"
-            >
-              <strong>{{ conversation.title }}</strong>
-              <span>{{ conversation.updatedAt }}</span>
-            </button>
-            <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
-          </div>
-        </aside>
-
         <section class="sprite-edit-column">
           <div class="sprite-workspace">
             <section class="panel sprite-card">
@@ -6153,6 +6129,36 @@ onBeforeUnmount(() => {
         </section>
 
         <aside class="sprite-preview-column">
+          <details class="panel sprite-recent-projects">
+            <summary>
+              <div>
+                <p class="eyebrow">Recent Projects</p>
+                <strong>最近项目</strong>
+              </div>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </summary>
+            <div class="sprite-recent-projects-list">
+              <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
+                新建任务
+              </button>
+              <button
+                v-for="conversation in spriteTaskRecords"
+                :key="conversation.id"
+                class="session-button"
+                :class="{ active: conversation.id === currentConversationId }"
+                type="button"
+                :disabled="conversationBusy"
+                @click="handleSpriteTaskSelect(conversation.id)"
+              >
+                <strong>{{ conversation.title }}</strong>
+                <span>{{ conversation.updatedAt }}</span>
+              </button>
+              <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
+            </div>
+          </details>
+
           <section class="panel sprite-card sprite-preview-card">
             <div class="sprite-section-header">
               <div>
