@@ -4100,17 +4100,10 @@ h2 {
   gap: 14px;
 }
 
-.sprite-preview-stage,
-.sprite-preview-actions {
+.sprite-preview-stage {
   display: grid;
   gap: 12px;
   padding-top: 2px;
-}
-
-.sprite-preview-stage h3,
-.sprite-preview-actions h3 {
-  margin: 0;
-  font-size: 0.96rem;
 }
 
 .sprite-preview-canvas {
@@ -4178,11 +4171,25 @@ h2 {
   outline-color: var(--accent);
 }
 
+.sprite-preview-tab:disabled {
+  opacity: 0.45;
+}
+
+.sprite-preview-tab-action {
+  min-width: 52px;
+}
+
 .sprite-preview-frame-strip {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   min-height: 36px;
+}
+
+.sprite-preview-frame-box.active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  outline-color: var(--accent);
 }
 
 .sprite-reference-gallery {

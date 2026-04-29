@@ -324,7 +324,9 @@ const spriteFrameCount = ref(4)
 const spriteWorkspaceBusy = ref(false)
 const spriteConceptSize = ref('1024x1536')
 const spriteReferenceInput = ref<HTMLInputElement | null>(null)
+const spritePreviewTab = ref<'character' | 'animation'>('character')
 const spritePreviewActionGroupId = ref('')
+const spritePreviewFrameIndex = ref(0)
 
 const imagePrompt = ref('')
 const imageSize = ref(imageSizes[0])
@@ -513,12 +515,27 @@ const currentSpritePreviewImage = computed(() => {
   }
   return spriteReferenceImage.value || latestGeneratedImage.value || null
 })
-const currentSpritePreviewPrompt = computed(() => (
-  currentSpritePreviewImage.value?.prompt || spriteState.value?.character?.description || ''
-))
+const currentSpritePreviewFrames = computed(() => {
+  const frames = currentSpritePreviewActionGroup.value?.frames || []
+  return frames
+    .slice()
+    .sort((left, right) => left.frameIndex - right.frameIndex)
+    .map((frame) => generatedImages.value.find((image) => image.id === frame.imageId) || null)
+    .filter((image): image is GeneratedImage => Boolean(image))
+})
+const currentSpriteAnimatedImage = computed(() => {
+  const frames = currentSpritePreviewFrames.value
+  if (frames.length === 0) {
+    return null
+  }
+  return frames[spritePreviewFrameIndex.value % frames.length] || frames[0] || null
+})
 const spritePreviewStatusLabel = computed(() => {
   if (imageBusy.value) {
     return imageTaskLabel.value || 'Loading'
+  }
+  if (spritePreviewTab.value === 'animation') {
+    return currentSpritePreviewFrames.value.length > 0 ? `已生成 · ${currentSpritePreviewFrames.value.length} 帧循环` : '等待动画帧'
   }
   if (currentSpritePreviewImage.value) {
     return '已生成'
@@ -5462,6 +5479,29 @@ watch(() => spritePreviewActionGroups.value.map((group) => group.id), (groupIds)
     spritePreviewActionGroupId.value = groupIds[0]
   }
 }, { immediate: true })
+watch(() => currentSpritePreviewActionGroup.value?.id || '', () => {
+  spritePreviewFrameIndex.value = 0
+})
+watch(() => currentSpritePreviewFrames.value.length, (length) => {
+  if (length <= 0) {
+    spritePreviewFrameIndex.value = 0
+    return
+  }
+  spritePreviewFrameIndex.value = Math.min(spritePreviewFrameIndex.value, length - 1)
+})
+watch(
+  [spritePreviewTab, () => currentSpritePreviewActionGroup.value?.id || '', () => currentSpritePreviewFrames.value.length],
+  ([tab, _groupId, frameCount], _prev, onCleanup) => {
+    if (tab !== 'animation' || frameCount <= 1) {
+      return
+    }
+    const timer = window.setInterval(() => {
+      spritePreviewFrameIndex.value = (spritePreviewFrameIndex.value + 1) % frameCount
+    }, 280)
+    onCleanup(() => window.clearInterval(timer))
+  },
+  { immediate: true }
+)
 watch(() => pptSlides.value.length, (length) => {
   if (length <= 0) {
     pptCurrentSlideIndex.value = 0
@@ -6108,9 +6148,6 @@ onBeforeUnmount(() => {
                 <h2>预览区</h2>
               </div>
               <div class="sprite-inline-actions">
-                <button class="secondary mini" type="button" :disabled="spriteWorkspaceBusy" @click="openSpriteReferenceUpload">
-                  上传参考图
-                </button>
                 <button
                   v-if="spriteReferenceImage"
                   class="ghost mini"
@@ -6130,44 +6167,67 @@ onBeforeUnmount(() => {
               @change="handleSpriteReferenceUpload"
             />
             <section class="sprite-preview-stage">
-              <div class="sprite-preview-canvas" :class="{ empty: !currentSpritePreviewImage }">
+              <div class="sprite-preview-tabs">
+                <button
+                  class="sprite-preview-tab"
+                  :class="{ active: spritePreviewTab === 'character' }"
+                  type="button"
+                  @click="spritePreviewTab = 'character'"
+                >
+                  角色图
+                </button>
+                <button
+                  class="sprite-preview-tab"
+                  :class="{ active: spritePreviewTab === 'animation' }"
+                  type="button"
+                  :disabled="spritePreviewActionGroups.length === 0"
+                  @click="spritePreviewTab = 'animation'"
+                >
+                  动画预览
+                </button>
+                <button
+                  v-for="group in spritePreviewActionGroups"
+                  :key="group.id"
+                  class="sprite-preview-tab sprite-preview-tab-action"
+                  :class="{ active: currentSpritePreviewActionGroup?.id === group.id }"
+                  type="button"
+                  :disabled="spritePreviewTab !== 'animation'"
+                  @click="spritePreviewActionGroupId = group.id"
+                >
+                  {{ group.action }}
+                </button>
+              </div>
+              <div class="sprite-preview-canvas" :class="{ empty: spritePreviewTab === 'character' ? !currentSpritePreviewImage : !currentSpriteAnimatedImage }">
                 <img
-                  v-if="currentSpritePreviewImage"
+                  v-if="spritePreviewTab === 'character' && currentSpritePreviewImage"
                   :src="imagePreviewUrl(currentSpritePreviewImage, modalPreviewWidth)"
                   :alt="currentSpritePreviewImage.prompt"
                   loading="lazy"
                   @error="handleGeneratedImageError($event, currentSpritePreviewImage)"
                   @click="currentSpritePreviewImage.id ? openSpriteFramePreview(currentSpritePreviewImage.id) : undefined"
                 />
-                <span v-else>当前还没有可预览的角色大图</span>
+                <img
+                  v-else-if="spritePreviewTab === 'animation' && currentSpriteAnimatedImage"
+                  :src="imagePreviewUrl(currentSpriteAnimatedImage, modalPreviewWidth)"
+                  :alt="currentSpriteAnimatedImage.prompt"
+                  loading="lazy"
+                  @error="handleGeneratedImageError($event, currentSpriteAnimatedImage)"
+                  @click="currentSpriteAnimatedImage.id ? openSpriteFramePreview(currentSpriteAnimatedImage.id) : undefined"
+                />
+                <span v-else>{{ spritePreviewTab === 'animation' ? '当前动作还没有可播放帧' : '当前还没有可预览的角色大图' }}</span>
               </div>
               <div class="sprite-preview-status">
                 <strong>{{ spriteState?.character?.name || '' }}</strong>
                 <span>{{ spritePreviewStatusLabel }}</span>
               </div>
-            </section>
-
-            <section class="sprite-preview-actions">
-              <h3>动作预览</h3>
-              <div class="sprite-preview-tabs">
+              <div v-if="spritePreviewTab === 'animation'" class="sprite-preview-frame-strip">
                 <button
-                  v-for="group in spritePreviewActionGroups"
-                  :key="group.id"
-                  class="sprite-preview-tab"
-                  :class="{ active: currentSpritePreviewActionGroup?.id === group.id }"
-                  type="button"
-                  @click="spritePreviewActionGroupId = group.id"
-                >
-                  {{ group.action }}
-                </button>
-              </div>
-              <div class="sprite-preview-frame-strip">
-                <button
-                  v-for="frame in currentSpritePreviewActionGroup?.frames || []"
+                  v-for="(frame, frameIndex) in currentSpritePreviewActionGroup?.frames || []"
                   :key="frame.id"
                   class="sprite-preview-frame-box"
                   type="button"
-                  @click="openSpriteFramePreview(frame.imageId)"
+                  :class="{ active: currentSpritePreviewFrames[spritePreviewFrameIndex]?.id === frame.imageId }"
+                  @click="spritePreviewFrameIndex = frameIndex"
                 >
                   {{ frame.frameIndex + 1 }}
                 </button>
@@ -6213,6 +6273,9 @@ onBeforeUnmount(() => {
                   <button class="primary sprite-generate-primary" type="button" :disabled="!canGenerateSpriteConcept" @click="handleGenerateSpriteConcept">
                     {{ imageBusy ? (imageTaskLabel || '处理中...') : '生成角色设定图' }}
                   </button>
+                  <button class="secondary mini" type="button" :disabled="spriteWorkspaceBusy" @click="openSpriteReferenceUpload">
+                    上传参考图
+                  </button>
                   <button class="ghost mini" type="button" :disabled="spriteWorkspaceBusy" @click="resetSpriteCharacterForm">
                     重置表单
                   </button>
@@ -6243,8 +6306,13 @@ onBeforeUnmount(() => {
                   外观描述
                   <textarea v-model="spriteCharacterForm.description" rows="4" placeholder="描述整体外观、气质、年龄感和辨识度"></textarea>
                 </label>
-                <label>
-                  👩 发型
+                <details class="sprite-collapsible-field">
+                  <summary>
+                    <span class="sprite-field-label">👩 发型</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </summary>
                   <div class="sprite-choice-tags">
                     <button
                       v-for="option in spriteHairOptions"
@@ -6265,9 +6333,14 @@ onBeforeUnmount(() => {
                     maxlength="120"
                     placeholder="输入自定义发型"
                   />
-                </label>
-                <label>
-                  👁️ 表情风格
+                </details>
+                <details class="sprite-collapsible-field">
+                  <summary>
+                    <span class="sprite-field-label">👁️ 表情风格</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </summary>
                   <div class="sprite-choice-tags">
                     <button
                       v-for="option in spriteExpressionOptions"
@@ -6288,11 +6361,16 @@ onBeforeUnmount(() => {
                     maxlength="120"
                     placeholder="输入自定义表情风格"
                   />
-                </label>
-                <label>
-                  服装
+                </details>
+                <details class="sprite-collapsible-field">
+                  <summary>
+                    <span class="sprite-field-label">👗 服装</span>
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
+                  </summary>
                   <input v-model="spriteCharacterForm.costume" type="text" maxlength="160" placeholder="短斗篷、轻甲、腰间工具包" />
-                </label>
+                </details>
                 <details class="sprite-form-span-2 sprite-collapsible-field">
                   <summary>
                     <span class="sprite-field-label">⚔️ 装备</span>
