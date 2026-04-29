@@ -15,6 +15,8 @@ import urllib.request
 NAMESPACE = "sub2api-playground"
 DEFAULT_PLAYGROUND_URL = "https://playground.meteor041.com"
 DEFAULT_MODEL = "image2"
+DEFAULT_USER_AGENT = "Sub2API-Image-Skill/1.0 (+https://playground.meteor041.com)"
+USER_AGENT = os.environ.get("SUB2API_USER_AGENT", DEFAULT_USER_AGENT)
 
 
 class ScriptError(Exception):
@@ -34,7 +36,11 @@ def normalize_url(value):
 
 def request_json(base_url, path, payload=None, token=None, method=None):
     data = None
-    headers = {"Accept": "application/json"}
+    headers = {
+        "Accept": "application/json",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": USER_AGENT,
+    }
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -122,8 +128,8 @@ def public_key_for(private_key):
 
 
 def sign_message(private_key, namespace, message):
-    with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tmp:
-        tmp.write(message)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp:
+        tmp.write(message.encode("utf-8"))
         message_path = Path(tmp.name)
     signature_path = Path(f"{message_path}.sig")
     try:
@@ -187,6 +193,7 @@ def build_payload(args):
 
 
 def main():
+    global USER_AGENT
     parser = argparse.ArgumentParser(description="Create an async Sub2API Playground image task.")
     parser.add_argument("--prompt", required=True)
     parser.add_argument("--reference", "--references", dest="references", action="append", nargs="+", default=[])
@@ -195,8 +202,10 @@ def main():
     parser.add_argument("--size", default="1024x1024")
     parser.add_argument("--playground-url", default=os.environ.get("SUB2API_PLAYGROUND_URL", DEFAULT_PLAYGROUND_URL))
     parser.add_argument("--ssh-key", default=os.environ.get("SUB2API_SSH_KEY"))
+    parser.add_argument("--user-agent", default=os.environ.get("SUB2API_USER_AGENT", DEFAULT_USER_AGENT))
     args = parser.parse_args()
 
+    USER_AGENT = args.user_agent
     base_url = normalize_url(args.playground_url)
     token = ssh_login(base_url, args.ssh_key)
     task = request_json(base_url, "/api/playground/ssh/tasks", {"payload": build_payload(args)}, token=token)
