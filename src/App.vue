@@ -1297,6 +1297,20 @@ function mimeTypeFromDataUrl(dataUrl: string): string {
   return match?.[1] || 'image/png'
 }
 
+function imageOutputFormatMimeType(outputFormat = ''): string {
+  const normalized = String(outputFormat || '').trim().toLowerCase()
+  if (normalized === 'jpg' || normalized === 'jpeg') {
+    return 'image/jpeg'
+  }
+  if (normalized === 'webp') {
+    return 'image/webp'
+  }
+  if (normalized === 'gif') {
+    return 'image/gif'
+  }
+  return 'image/png'
+}
+
 async function createChatImageAttachment(file: File): Promise<ChatImageAttachment> {
   if (!file.type.startsWith('image/')) {
     throw new Error(`仅支持图片文件：${file.name}`)
@@ -3320,13 +3334,14 @@ function extractGeneratedImages(data: unknown, prompt: string, size: string): Ge
     .map((item: Record<string, any>) => {
       const b64 = typeof item.b64_json === 'string' ? item.b64_json : ''
       const remoteUrl = typeof item.url === 'string' ? item.url : ''
+      const outputFormat = typeof item.output_format === 'string' ? item.output_format : 'png'
       return {
         id: uid('image'),
         shareKey: uid('share'),
         status: 'ready',
         prompt,
         size,
-        dataUrl: b64 ? `data:image/png;base64,${b64}` : undefined,
+        dataUrl: b64 ? `data:${imageOutputFormatMimeType(outputFormat)};base64,${b64}` : undefined,
         remoteUrl: remoteUrl || undefined,
         image_url: remoteUrl || undefined,
         createdAt: Date.now()
