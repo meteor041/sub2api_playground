@@ -5964,6 +5964,9 @@ onBeforeUnmount(() => {
                   <h2>角色设定</h2>
                 </div>
                 <div class="sprite-inline-actions">
+                  <div class="sprite-inline-select">
+                    <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
+                  </div>
                   <button class="ghost mini" type="button" :disabled="spriteWorkspaceBusy" @click="resetSpriteCharacterForm">
                     重置表单
                   </button>
@@ -5984,10 +5987,6 @@ onBeforeUnmount(() => {
                 <label class="sprite-form-span-2">
                   外观描述
                   <textarea v-model="spriteCharacterForm.description" rows="4" placeholder="描述整体外观、气质、年龄感和辨识度"></textarea>
-                </label>
-                <label>
-                  设定图尺寸
-                  <RoundSelect v-model="spriteConceptSize" title="设定图尺寸" :options="imageSizeOptions" :show-stepper="false" />
                 </label>
                 <details class="sprite-detail-box sprite-form-span-2">
                   <summary>

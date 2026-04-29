@@ -3840,6 +3840,12 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+  align-items: center;
+}
+
+.sprite-inline-select {
+  width: 180px;
+  min-width: 0;
 }
 
 .sprite-form-grid {
