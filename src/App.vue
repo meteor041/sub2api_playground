@@ -324,7 +324,7 @@ const spriteFrameCount = ref(4)
 const spriteWorkspaceBusy = ref(false)
 const spriteConceptSize = ref('1024x1536')
 const spriteReferenceInput = ref<HTMLInputElement | null>(null)
-const spritePreviewTab = ref<'character' | 'animation'>('character')
+const spritePreviewTab = ref<'character' | 'animation' | 'projects'>('character')
 const spritePreviewActionGroupId = ref('')
 const spritePreviewFrameIndex = ref(0)
 
@@ -533,6 +533,9 @@ const currentSpriteAnimatedImage = computed(() => {
 const spritePreviewStatusLabel = computed(() => {
   if (imageBusy.value) {
     return imageTaskLabel.value || 'Loading'
+  }
+  if (spritePreviewTab.value === 'projects') {
+    return `${spriteTaskRecords.value.length} 个项目`
   }
   if (spritePreviewTab.value === 'animation') {
     return currentSpritePreviewFrames.value.length > 0 ? `已生成 · ${currentSpritePreviewFrames.value.length} 帧循环` : '等待动画帧'
@@ -6111,36 +6114,6 @@ onBeforeUnmount(() => {
 
       <div v-else class="sprite-studio-layout">
         <aside class="sprite-preview-column">
-          <details class="panel sprite-recent-projects">
-            <summary>
-              <div>
-                <p class="eyebrow">Recent Projects</p>
-                <strong>最近项目</strong>
-              </div>
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </summary>
-            <div class="sprite-recent-projects-list">
-              <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
-                新建任务
-              </button>
-              <button
-                v-for="conversation in spriteTaskRecords"
-                :key="conversation.id"
-                class="session-button"
-                :class="{ active: conversation.id === currentConversationId }"
-                type="button"
-                :disabled="conversationBusy"
-                @click="handleSpriteTaskSelect(conversation.id)"
-              >
-                <strong>{{ conversation.title }}</strong>
-                <span>{{ conversation.updatedAt }}</span>
-              </button>
-              <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
-            </div>
-          </details>
-
           <section class="panel sprite-card sprite-preview-card">
             <div class="sprite-section-header">
               <div></div>
@@ -6183,6 +6156,14 @@ onBeforeUnmount(() => {
                   动画预览
                 </button>
                 <button
+                  class="sprite-preview-tab"
+                  :class="{ active: spritePreviewTab === 'projects' }"
+                  type="button"
+                  @click="spritePreviewTab = 'projects'"
+                >
+                  最近项目
+                </button>
+                <button
                   v-for="group in spritePreviewActionGroups"
                   :key="group.id"
                   class="sprite-preview-tab sprite-preview-tab-action"
@@ -6194,7 +6175,11 @@ onBeforeUnmount(() => {
                   {{ group.action }}
                 </button>
               </div>
-              <div class="sprite-preview-canvas" :class="{ empty: spritePreviewTab === 'character' ? !currentSpritePreviewImage : !currentSpriteAnimatedImage }">
+              <div
+                v-if="spritePreviewTab !== 'projects'"
+                class="sprite-preview-canvas"
+                :class="{ empty: spritePreviewTab === 'character' ? !currentSpritePreviewImage : !currentSpriteAnimatedImage }"
+              >
                 <img
                   v-if="spritePreviewTab === 'character' && currentSpritePreviewImage"
                   :src="imagePreviewUrl(currentSpritePreviewImage, modalPreviewWidth)"
@@ -6212,6 +6197,24 @@ onBeforeUnmount(() => {
                   @click="currentSpriteAnimatedImage.id ? openSpriteFramePreview(currentSpriteAnimatedImage.id) : undefined"
                 />
                 <span v-else>{{ spritePreviewTab === 'animation' ? '当前动作还没有可播放帧' : '当前还没有可预览的角色大图' }}</span>
+              </div>
+              <div v-else class="sprite-recent-projects-list sprite-recent-projects-panel">
+                <button class="secondary mini" type="button" :disabled="conversationBusy" @click="startNewSpriteTask">
+                  新建任务
+                </button>
+                <button
+                  v-for="conversation in spriteTaskRecords"
+                  :key="conversation.id"
+                  class="session-button"
+                  :class="{ active: conversation.id === currentConversationId }"
+                  type="button"
+                  :disabled="conversationBusy"
+                  @click="handleSpriteTaskSelect(conversation.id)"
+                >
+                  <strong>{{ conversation.title }}</strong>
+                  <span>{{ conversation.updatedAt }}</span>
+                </button>
+                <p v-if="spriteTaskRecords.length === 0" class="empty">还没有角色资产任务。</p>
               </div>
               <div class="sprite-preview-status">
                 <strong>{{ spriteState?.character?.name || '' }}</strong>

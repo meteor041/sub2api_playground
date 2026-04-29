@@ -3841,46 +3841,7 @@ h2 {
 
 .sprite-preview-column {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 220px;
-  align-items: start;
   gap: 12px;
-}
-
-.sprite-recent-projects {
-  grid-column: 2;
-  grid-row: 1;
-  min-height: 96px;
-  padding: 0;
-  overflow: hidden;
-}
-
-.sprite-recent-projects summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 14px 16px;
-  list-style: none;
-  cursor: pointer;
-}
-
-.sprite-recent-projects summary::-webkit-details-marker {
-  display: none;
-}
-
-.sprite-recent-projects summary svg {
-  width: 18px;
-  height: 18px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.8;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  transition: transform 160ms ease;
-}
-
-.sprite-recent-projects[open] summary svg {
-  transform: rotate(180deg);
 }
 
 .sprite-recent-projects-list {
@@ -3888,11 +3849,14 @@ h2 {
   gap: 8px;
   min-height: 72px;
   align-content: start;
-  padding: 0 12px 12px;
 }
 
 .sprite-recent-projects-list .empty {
   padding: 8px 2px 2px;
+}
+
+.sprite-recent-projects-panel {
+  padding: 2px 0;
 }
 
 .sprite-card {
@@ -4298,16 +4262,6 @@ h2 {
 @media (max-width: 1100px) {
   .sprite-studio-layout {
     grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.9fr);
-  }
-
-  .sprite-preview-column {
-    grid-template-columns: 1fr;
-  }
-
-  .sprite-recent-projects,
-  .sprite-preview-card {
-    grid-column: auto;
-    grid-row: auto;
   }
 
   .sprite-reference-card {
